@@ -1,0 +1,1157 @@
+{
+  "$schema": "../_schema.json",
+  "id": "mailbox-operations",
+  "title": "Mailbox Operations (Exchange Online)",
+  "order": 4,
+  "status": "complete",
+  "summary": "Reference implementation. Covers the three questions a BEC or mailbox-compromise investigation has to answer: what did they read, what did they leave behind to keep reading it, and who else did they give access to.",
+  "workloads": [
+    "Exchange"
+  ],
+  "recordTypes": [
+    {
+      "id": 1,
+      "member": "ExchangeAdmin",
+      "role": "Cmdlet-driven changes: inbox rules created outside the Outlook client, permission grants, forwarding, audit bypass."
+    },
+    {
+      "id": 2,
+      "member": "ExchangeItem",
+      "role": "Single-item and client-side actions, including UpdateInboxRules and FolderBind."
+    },
+    {
+      "id": 3,
+      "member": "ExchangeItemGroup",
+      "role": "Bulk item actions such as multi-item move or delete."
+    },
+    {
+      "id": 50,
+      "member": "ExchangeItemAggregated",
+      "role": "MailItemsAccessed. The primary evidence for scoping what an attacker read."
+    },
+    {
+      "id": 19,
+      "member": "ExchangeAggregatedOperation",
+      "role": "Aggregated Exchange activity; useful for volume baselining."
+    },
+    {
+      "id": 101,
+      "member": "ExchangeSearch",
+      "role": "OWA search terms. Reveals what the attacker was hunting for. Audit (Premium) and not enabled by default."
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "mailitemsaccessed-scoping",
+      "title": "Scoping mailbox data access after compromise",
+      "summary": "Determine which specific messages an attacker read, from where, and whether the record is complete.",
+      "overview": {
+        "context": "After a confirmed account compromise the notification and legal questions turn on exactly which messages were exposed. MailItemsAccessed is the only telemetry that answers that at message granularity, via the InternetMessageId of each item bound. It is also the artifact most often assumed present when it is not.",
+        "actorBehavior": [
+          "Authenticates with a stolen token, refresh token or password and reads mail over REST, EWS, MAPI, IMAP or ActiveSync.",
+          "Synchronises the mailbox to a desktop Outlook client, producing Sync rather than Bind records and removing per-message detail.",
+          "Uses an OAuth application identity so the access does not appear in interactive sign-in telemetry.",
+          "Generates enough access volume to trip audit throttling, degrading the record of their own activity as a side effect."
+        ],
+        "triageQuestions": [
+          "Which InternetMessageIds were bound, and do any correspond to messages containing regulated data?",
+          "Was access Owner, Admin or Delegate context?",
+          "Was the mailbox throttled at any point in the window, making the item list incomplete?",
+          "Did access arrive through an application identity rather than an interactive session?"
+        ],
+        "mitre": [
+          {
+            "id": "T1114.002",
+            "role": "primary",
+            "note": "Remote collection of mail content from the cloud mailbox."
+          },
+          {
+            "id": "T1078.004",
+            "role": "supporting",
+            "note": "Access is via a valid cloud identity, not an exploit."
+          },
+          {
+            "id": "T1550.001",
+            "role": "supporting",
+            "note": "Applies where access is token- or application-mediated."
+          }
+        ],
+        "ual": {
+          "workloads": [
+            "Exchange"
+          ],
+          "recordTypeIds": [
+            50,
+            2
+          ],
+          "operations": [
+            {
+              "name": "MailItemsAccessed",
+              "recordTypeId": 50,
+              "note": "Two operation types. Bind records individual message access and carries FolderItems with InternetMessageId. Sync records a bulk client download and carries no per-item detail."
+            },
+            {
+              "name": "FolderBind",
+              "recordTypeId": 2,
+              "note": "Folder was opened. Useful for delegate-context access even where MailItemsAccessed is absent."
+            }
+          ]
+        },
+        "access": {
+          "auditTier": "standard",
+          "licenseNotes": [
+            {
+              "text": "MailItemsAccessed is Audit (Standard) functionality. Microsoft Learn states it is enabled by default for users assigned an Office 365 E3/E5 or Microsoft 365 E3/E5 licence. Much third-party material still describes it as E5-only; that guidance is stale.",
+              "verified": true,
+              "lastVerified": "2026-09-06",
+              "severity": "critical",
+              "source": "https://learn.microsoft.com/en-us/purview/audit-log-investigate-accounts"
+            },
+            {
+              "text": "E1 mailboxes are not covered. Confirm the specific user licence before assuming the artifact exists.",
+              "verified": true,
+              "lastVerified": "2026-09-06",
+              "severity": "caution"
+            },
+            {
+              "text": "Mailbox auditing must not have been narrowed by a custom audit set. Where AuditOwner, AuditDelegate or AuditAdmin have been customised, verify MailItemsAccessed is still in the configured action list.",
+              "verified": true,
+              "lastVerified": "2026-09-06",
+              "severity": "caution"
+            }
+          ],
+          "rbac": [
+            {
+              "text": "Search-UnifiedAuditLog requires the View-Only Audit Logs or Audit Logs role in Exchange Online, held by default through the Compliance Management and Organization Management role groups.",
+              "verified": true,
+              "lastVerified": "2026-09-06",
+              "source": "https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/search-unifiedauditlog"
+            },
+            {
+              "text": "The AuditLogQuery Graph API requires the AuditLogsQuery.Read.All permission, granted to the calling application or delegated user.",
+              "verified": true,
+              "lastVerified": "2026-09-06",
+              "source": "https://learn.microsoft.com/en-us/graph/api/resources/security-auditlogquery"
+            }
+          ]
+        }
+      },
+      "acquisition": {
+        "methods": [
+          {
+            "id": "exo-mia",
+            "title": "Exchange Online PowerShell with backoff and completeness checking",
+            "transport": "exo-powershell",
+            "status": {
+              "text": "Since late January 2025 the HighCompleteness parameter is permanently true for all Search-UnifiedAuditLog queries. Searches are materially slower than the pre-2025 behaviour and throttle readily. Default to wider slices with exponential backoff rather than narrow slices with a fixed sleep.",
+              "verified": true,
+              "lastVerified": "2026-09-06",
+              "severity": "critical",
+              "source": "https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/search-unifiedauditlog"
+            },
+            "params": [
+              {
+                "name": "StartDate",
+                "type": "date",
+                "label": "Window start (UTC)",
+                "default": "2026-08-01T00:00:00Z"
+              },
+              {
+                "name": "EndDate",
+                "type": "date",
+                "label": "Window end (UTC)",
+                "default": "2026-09-01T00:00:00Z"
+              },
+              {
+                "name": "TargetUpn",
+                "type": "string",
+                "label": "Target mailbox UPN",
+                "default": "jsmith@contoso.com"
+              },
+              {
+                "name": "IntervalHours",
+                "type": "number",
+                "label": "Slice size (hours)",
+                "default": 6,
+                "help": "Widen for low-volume mailboxes. Narrow only if a slice reports the 50,000-record ceiling."
+              },
+              {
+                "name": "OutputPath",
+                "type": "path",
+                "label": "Output directory",
+                "default": "C:\\\\IR\\\\UAL"
+              }
+            ],
+            "template": "#requires -Modules ExchangeOnlineManagement\n<#\n    MailItemsAccessed acquisition - Purview Unified Audit Log via Exchange Online PowerShell\n    Generated by the UAL Framework. Review before running against a live tenant.\n\n    Written for post-January-2025 behaviour: HighCompleteness is now forced true on every\n    Search-UnifiedAuditLog query, so slices are slower and throttle far more readily than\n    the pre-2025 'narrow window + fixed Start-Sleep' pattern assumed.\n#>\n[CmdletBinding()]\nparam(\n    [datetime] $StartDate     = '{{StartDate}}',\n    [datetime] $EndDate       = '{{EndDate}}',\n    [string[]] $TargetUpn     = @('{{TargetUpn}}'),\n    [int]      $IntervalHours = {{IntervalHours}},\n    [string]   $OutputPath    = '{{OutputPath}}'\n)\n\n$ErrorActionPreference = 'Stop'\n$MaxPagesPerSlice      = 12          # 12 x 5000 = the 50,000 session ceiling\n$MaxBackoffAttempts    = 5\n\n# --- 1. Session ------------------------------------------------------------\nif (-not (Get-ConnectionInformation -ErrorAction SilentlyContinue)) {\n    Connect-ExchangeOnline -ShowBanner:$false\n}\n\n# --- 2. Confirm the log was actually recording ------------------------------\n# Doubles as an anti-forensics check: if ingestion was disabled during the\n# incident window, silence in the results is meaningless.\n$cfg = Get-AdminAuditLogConfig\nif (-not $cfg.UnifiedAuditLogIngestionEnabled) {\n    Write-Warning 'UnifiedAuditLogIngestionEnabled is FALSE. Records may be missing for the requested window. Check RecordType 1 / Set-AdminAuditLogConfig and RecordType 297 / AuditConfig for when this changed.'\n}\n\n# --- 3. Slice loop with exponential backoff ---------------------------------\nfunction Get-UalSlice {\n    param([datetime] $From, [datetime] $To, [string[]] $Upn)\n\n    $sessionId = [guid]::NewGuid().ToString()\n    $collected = [System.Collections.Generic.List[object]]::new()\n    $attempt   = 0\n    $pages     = 0\n\n    while ($pages -lt $MaxPagesPerSlice) {\n        try {\n            $page = Search-UnifiedAuditLog `\n                        -StartDate      $From `\n                        -EndDate        $To `\n                        -RecordType     ExchangeItemAggregated `\n                        -Operations     MailItemsAccessed `\n                        -UserIds        $Upn `\n                        -ResultSize     5000 `\n                        -SessionId      $sessionId `\n                        -SessionCommand ReturnLargeSet\n        }\n        catch {\n            $attempt++\n            if ($attempt -gt $MaxBackoffAttempts) { throw }\n            $wait = [math]::Pow(2, $attempt) * 15\n            Write-Warning ('Transient failure ({0}). Backing off {1}s - attempt {2}/{3}.' -f $_.Exception.Message, $wait, $attempt, $MaxBackoffAttempts)\n            Start-Sleep -Seconds $wait\n            continue\n        }\n\n        $attempt = 0\n        if (-not $page -or $page.Count -eq 0) { break }\n        $collected.AddRange($page)\n        $pages++\n    }\n\n    if ($collected.Count -ge 50000) {\n        Write-Warning ('Slice {0:u} to {1:u} hit the 50,000-record session ceiling and is TRUNCATED. Re-run this window with a smaller -IntervalHours, or switch to the Graph AuditLogQuery method.' -f $From, $To)\n    }\n    ,$collected\n}\n\n$raw    = [System.Collections.Generic.List[object]]::new()\n$cursor = $StartDate\nwhile ($cursor -lt $EndDate) {\n    $sliceEnd = [datetime]::Compare($cursor.AddHours($IntervalHours), $EndDate) -lt 0 ?\n                $cursor.AddHours($IntervalHours) : $EndDate\n    Write-Host ('Querying {0:u} -> {1:u}' -f $cursor, $sliceEnd)\n    $raw.AddRange((Get-UalSlice -From $cursor -To $sliceEnd -Upn $TargetUpn))\n    $cursor = $sliceEnd\n}\n\n# ReturnLargeSet returns unsorted results and can repeat records across pages.\n$records = $raw | Sort-Object -Property Identity -Unique\n\n# --- 4. Completeness check --------------------------------------------------\n# Exchange throttles MailItemsAccessed once a mailbox exceeds roughly 1,000\n# records in 24 hours, then suppresses auditing for the following 24 hours.\n# Any IsThrottled record means the access picture for that mailbox is INCOMPLETE.\n$throttled = $records | Where-Object { ($_.AuditData | ConvertFrom-Json).IsThrottled -eq $true }\nif ($throttled) {\n    Write-Warning ('{0} record(s) carry IsThrottled=true. Mailbox auditing was suppressed during part of this window - do NOT report the accessed-item list as exhaustive.' -f $throttled.Count)\n}\n\n# --- 5. Flatten to a per-message view ---------------------------------------\n$flat = foreach ($r in $records) {\n    $d = $r.AuditData | ConvertFrom-Json\n    $common = [ordered]@{\n        CreationTime   = $d.CreationTime\n        MailboxOwner   = $d.MailboxOwnerUPN\n        LogonUser      = $d.UserId\n        LogonType      = $d.LogonType          # 0 Owner, 1 Admin, 2 Delegate\n        ClientIP       = $d.ClientIPAddress\n        ClientInfo     = $d.ClientInfoString\n        AppId          = $d.AppId\n        SessionId      = $d.SessionId\n        OperationType  = $d.OperationCount ? 'Bind' : 'Sync'\n        OperationCount = $d.OperationCount\n        IsThrottled    = $d.IsThrottled\n    }\n\n    if ($d.Folders) {\n        foreach ($folder in $d.Folders) {\n            foreach ($item in $folder.FolderItems) {\n                [pscustomobject]($common + [ordered]@{\n                    FolderPath        = $folder.Path\n                    InternetMessageId = $item.InternetMessageId\n                    SizeInBytes       = $item.SizeInBytes\n                })\n            }\n        }\n    }\n    else {\n        # Sync operations carry no per-item detail: the whole folder was pulled\n        # to a desktop Outlook client. Treat the entire folder as exposed.\n        [pscustomobject]($common + [ordered]@{\n            FolderPath        = ($d.Folders.Path -join ';')\n            InternetMessageId = 'SYNC - ENTIRE FOLDER ASSUMED EXPOSED'\n            SizeInBytes       = $null\n        })\n    }\n}\n\n# --- 6. Output --------------------------------------------------------------\nNew-Item -ItemType Directory -Path $OutputPath -Force | Out-Null\n$stamp = Get-Date -Format 'yyyyMMdd-HHmmss'\n$records | ConvertTo-Json -Depth 20 | Set-Content (Join-Path $OutputPath \"MIA-raw-$stamp.json\")   -Encoding utf8\n$flat    | Export-Csv               (Join-Path $OutputPath \"MIA-items-$stamp.csv\") -NoTypeInformation -Encoding utf8\n\nWrite-Host ('{0} audit records -> {1} message-level rows.' -f $records.Count, @($flat).Count)",
+            "notes": [
+              {
+                "text": "ResultSize caps at 5,000 per call. A session using SessionCommand ReturnLargeSet caps at 50,000 and returns records unsorted, with duplicates across pages. Deduplicate on Identity before analysis.",
+                "verified": true,
+                "lastVerified": "2026-09-06",
+                "severity": "critical",
+                "source": "https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/search-unifiedauditlog"
+              },
+              {
+                "text": "All UAL timestamps are UTC. The cmdlet surfaces CreationDate on the record object while the embedded AuditData JSON uses CreationTime. Normalise before correlating with other sources.",
+                "verified": true,
+                "lastVerified": "2026-09-06"
+              }
+            ]
+          },
+          {
+            "id": "graph-mia",
+            "title": "Purview AuditLogQuery Graph API (asynchronous)",
+            "transport": "graph-auditlogquery",
+            "status": {
+              "text": "Microsoft moved the AuditLogQuery API from v1.0 back to beta in April 2025 (MC1052169) to address defects, and it continues to operate on the beta endpoint. It exceeds the 50,000-record cmdlet ceiling and results stay retrievable for 30 days after the job completes. Treat endpoint stability as a live question and confirm current status before standardising on it.",
+              "verified": true,
+              "lastVerified": "2026-09-06",
+              "severity": "caution",
+              "source": "https://learn.microsoft.com/en-us/graph/api/resources/security-auditlogquery"
+            },
+            "params": [
+              {
+                "name": "StartDate",
+                "type": "date",
+                "label": "Window start (UTC)",
+                "default": "2026-08-01T00:00:00Z"
+              },
+              {
+                "name": "EndDate",
+                "type": "date",
+                "label": "Window end (UTC)",
+                "default": "2026-09-01T00:00:00Z"
+              },
+              {
+                "name": "TargetUpn",
+                "type": "string",
+                "label": "Target mailbox UPN",
+                "default": "jsmith@contoso.com"
+              },
+              {
+                "name": "OutputPath",
+                "type": "path",
+                "label": "Output directory",
+                "default": "C:\\\\IR\\\\UAL"
+              }
+            ],
+            "template": "#requires -Modules Microsoft.Graph.Beta.Security\n<#\n    MailItemsAccessed acquisition - Purview AuditLogQuery Graph API (asynchronous).\n    Use this when a slice exceeds the 50,000-record ceiling of Search-UnifiedAuditLog,\n    or when repeated high-completeness cmdlet queries are being throttled.\n\n    App or delegated permission required: AuditLogsQuery.Read.All\n#>\n[CmdletBinding()]\nparam(\n    [string] $StartDate  = '{{StartDate}}',\n    [string] $EndDate    = '{{EndDate}}',\n    [string] $TargetUpn  = '{{TargetUpn}}',\n    [string] $OutputPath = '{{OutputPath}}'\n)\n\n$ErrorActionPreference = 'Stop'\nConnect-MgGraph -Scopes 'AuditLogsQuery.Read.All' -NoWelcome\n\n$body = @{\n    '@odata.type'            = 'microsoft.graph.security.auditLogQuery'\n    displayName              = \"MIA-$($TargetUpn.Split('@')[0])-$(Get-Date -Format yyyyMMddHHmm)\"\n    filterStartDateTime      = $StartDate\n    filterEndDateTime        = $EndDate\n    recordTypeFilters        = @('exchangeItemAggregated')\n    operationFilters         = @('MailItemsAccessed')\n    userPrincipalNameFilters = @($TargetUpn)\n}\n\n$job = New-MgBetaSecurityAuditLogQuery -BodyParameter $body\nWrite-Host ('Submitted audit job {0}. Polling...' -f $job.Id)\n\ndo {\n    Start-Sleep -Seconds 30\n    $job = Get-MgBetaSecurityAuditLogQuery -AuditLogQueryId $job.Id\n    Write-Host ('  status: {0}' -f $job.Status)\n} while ($job.Status -in @('notStarted', 'running'))\n\nif ($job.Status -ne 'succeeded') {\n    throw ('Audit job finished with status {0}.' -f $job.Status)\n}\n\n$records = Get-MgBetaSecurityAuditLogQueryRecord -AuditLogQueryId $job.Id -All\nNew-Item -ItemType Directory -Path $OutputPath -Force | Out-Null\n$records | ConvertTo-Json -Depth 20 |\n    Set-Content (Join-Path $OutputPath \"MIA-graph-$(Get-Date -Format yyyyMMdd-HHmmss).json\") -Encoding utf8\n\nWrite-Host ('{0} records retrieved. Job results remain retrievable for 30 days.' -f $records.Count)",
+            "notes": [
+              {
+                "text": "Job-based, so it does not block an interactive session, and it tolerates windows that would defeat the cmdlet entirely.",
+                "verified": true,
+                "lastVerified": "2026-09-06"
+              }
+            ]
+          }
+        ]
+      },
+      "hunting": {
+        "queries": [
+          {
+            "id": "mia-throttle-check",
+            "title": "Completeness check: was auditing throttled?",
+            "platform": "defender-xdr",
+            "table": "CloudAppEvents",
+            "purpose": "baseline",
+            "query": "// Run this FIRST. If it returns rows, the accessed-item list for that mailbox is\n// incomplete and must not be reported as exhaustive.\nCloudAppEvents\n| where Timestamp > ago(30d)\n| where ActionType == 'MailItemsAccessed'\n| where tobool(RawEventData.IsThrottled) == true\n| summarize\n      ThrottledRecords = count(),\n      FirstSeen        = min(Timestamp),\n      LastSeen         = max(Timestamp)\n    by Mailbox = tostring(RawEventData.MailboxOwnerUPN)\n| order by ThrottledRecords desc",
+            "notes": [
+              {
+                "text": "Exchange throttles MailItemsAccessed once a mailbox exceeds roughly 1,000 records in 24 hours and suppresses auditing for the following 24 hours, setting IsThrottled on the affected records. This is the single most consequential data gap in mailbox scoping and must be checked before any exposure statement is made.",
+                "verified": true,
+                "lastVerified": "2026-09-06",
+                "severity": "critical",
+                "source": "https://learn.microsoft.com/en-us/purview/audit-log-investigate-accounts"
+              }
+            ]
+          },
+          {
+            "id": "mia-sentinel-scope",
+            "title": "Access sources and volume by client IP",
+            "platform": "sentinel",
+            "table": "OfficeActivity",
+            "purpose": "scope",
+            "query": "// Scope mailbox data access for a confirmed compromised identity.\n// [VERIFY in your workspace] Exchange mailbox column names in OfficeActivity are\n// inconsistent across ingestion versions. Before trusting this, run:\n//   OfficeActivity | getschema | where ColumnName has_any ('Logon','Client','Folder')\nlet lookback = 30d;\nlet victim   = 'jsmith@contoso.com';\nOfficeActivity\n| where TimeGenerated > ago(lookback)\n| where RecordType == 'ExchangeItemAggregated'   // string member name, NOT the integer 50\n| where Operation  == 'MailItemsAccessed'\n| where MailboxOwnerUPN =~ victim\n// Exchange records may append a port and wrap IPv6 in brackets: normalise before joining.\n| extend ClientIPClean = extract(@'^\\[?([0-9A-Fa-f:.]+)\\]?(?::\\d+)?$', 1, ClientIP)\n| summarize\n      Accesses   = count(),\n      FirstSeen  = min(TimeGenerated),\n      LastSeen   = max(TimeGenerated),\n      Clients    = make_set(ClientInfoString, 20),\n      LogonTypes = make_set(Logon_Type, 5)\n    by ClientIPClean\n| order by Accesses desc",
+            "notes": [
+              {
+                "text": "OfficeActivity does not reliably project the nested Folders / FolderItems structure, so message-level InternetMessageId enumeration is not available here. Acquire via PowerShell or Graph for the authoritative item list and use this query for source and volume triage only.",
+                "verified": true,
+                "lastVerified": "2026-09-06",
+                "severity": "critical"
+              }
+            ]
+          },
+          {
+            "id": "mia-xdr-scope",
+            "title": "Access sources, application identity and throttle status",
+            "platform": "defender-xdr",
+            "table": "CloudAppEvents",
+            "purpose": "scope",
+            "query": "// Same scoping question, Defender XDR advanced hunting.\n// CloudAppEvents uses Timestamp (not TimeGenerated) and RawEventData (not AuditData).\n// RawEventData is already dynamic - index it directly, no parse_json() needed.\nlet lookback = 30d;\nlet victim   = 'jsmith@contoso.com';\nCloudAppEvents\n| where Timestamp > ago(lookback)\n| where ActionType == 'MailItemsAccessed'\n| where tostring(RawEventData.MailboxOwnerUPN) =~ victim\n| extend LogonType      = tostring(RawEventData.LogonType),\n         ClientInfo     = tostring(RawEventData.ClientInfoString),\n         OperationCount = toint(RawEventData.OperationCount),\n         IsThrottled    = tobool(RawEventData.IsThrottled),\n         SessionId      = tostring(RawEventData.SessionId),\n         AppId          = tostring(RawEventData.AppId),\n         Folders        = RawEventData.Folders\n| summarize\n      Records        = count(),\n      BoundItems     = sum(OperationCount),\n      ThrottledSeen  = countif(IsThrottled == true),\n      FirstSeen      = min(Timestamp),\n      LastSeen       = max(Timestamp),\n      Clients        = make_set(ClientInfo, 20)\n    by IPAddress, LogonType, AppId\n| order by BoundItems desc",
+            "notes": [
+              {
+                "text": "CloudAppEvents coverage depends on the Defender for Cloud Apps Office 365 connector and is not a one-to-one mirror of Purview UAL. Where the two disagree, Purview is authoritative for the audit record.",
+                "verified": true,
+                "lastVerified": "2026-09-06",
+                "severity": "caution"
+              }
+            ]
+          }
+        ]
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "MailboxOwnerUPN",
+            "type": "string",
+            "description": "Owner of the mailbox that was accessed.",
+            "officeActivityColumn": "MailboxOwnerUPN",
+            "evidentialValue": "high"
+          },
+          {
+            "name": "UserId",
+            "type": "string",
+            "description": "Identity that performed the access. Differs from MailboxOwnerUPN in delegate and admin context.",
+            "officeActivityColumn": "UserId",
+            "evidentialValue": "high"
+          },
+          {
+            "name": "LogonType",
+            "type": "int",
+            "description": "Access context: 0 Owner, 1 Admin, 2 Delegate.",
+            "officeActivityColumn": "Logon_Type",
+            "gotcha": "Column naming for this field varies across OfficeActivity ingestion versions. Confirm with getschema before relying on it.",
+            "evidentialValue": "high"
+          },
+          {
+            "name": "Folders",
+            "type": "array",
+            "description": "Folders touched. Each entry carries Path, FolderItems and Id.",
+            "officeActivityColumn": null,
+            "gotcha": "Not reliably projected into OfficeActivity. Acquire via PowerShell or Graph for message-level detail.",
+            "evidentialValue": "high"
+          },
+          {
+            "name": "Folders[].FolderItems[].InternetMessageId",
+            "type": "string",
+            "description": "RFC 5322 Message-ID of each individual message bound. This is the field that answers \"which emails were exposed\".",
+            "officeActivityColumn": null,
+            "evidentialValue": "high"
+          },
+          {
+            "name": "OperationCount",
+            "type": "int",
+            "description": "Number of bind operations aggregated into this record. Bind operations within a short window are collapsed into one record.",
+            "officeActivityColumn": "OperationCount",
+            "gotcha": "Counting records instead of summing OperationCount undercounts accessed items, often by an order of magnitude.",
+            "evidentialValue": "high"
+          },
+          {
+            "name": "IsThrottled",
+            "type": "bool",
+            "description": "True when mailbox auditing was being suppressed. Presence of any true value invalidates an exhaustive-exposure claim.",
+            "officeActivityColumn": null,
+            "evidentialValue": "high"
+          },
+          {
+            "name": "ClientIPAddress",
+            "type": "string",
+            "description": "Source address of the client.",
+            "officeActivityColumn": "ClientIP",
+            "gotcha": "Exchange records may append a source port and wrap IPv6 in brackets. Normalise before joining to sign-in or firewall data.",
+            "evidentialValue": "high"
+          },
+          {
+            "name": "ClientInfoString",
+            "type": "string",
+            "description": "Client and protocol string, e.g. Outlook desktop, REST, EWS, ActiveSync.",
+            "officeActivityColumn": "ClientInfoString",
+            "evidentialValue": "medium"
+          },
+          {
+            "name": "AppId",
+            "type": "string",
+            "description": "Application identity used for the access. Non-empty values indicate app-mediated access that will not appear in interactive sign-in logs.",
+            "officeActivityColumn": null,
+            "evidentialValue": "high"
+          },
+          {
+            "name": "SessionId",
+            "type": "string",
+            "description": "Groups related accesses into a single session. Useful for reconstructing an attacker working sequence.",
+            "officeActivityColumn": null,
+            "evidentialValue": "medium"
+          },
+          {
+            "name": "OperationProperties",
+            "type": "array",
+            "description": "Name/Value pairs holding MailAccessType (Bind or Sync) and IsThrottled on some record versions.",
+            "officeActivityColumn": "OperationProperties",
+            "evidentialValue": "medium"
+          }
+        ]
+      },
+      "caveats": {
+        "latency": [
+          {
+            "text": "Microsoft publishes no guaranteed ingestion SLA. It withdrew its fixed per-workload latency table in 2022. Treat 60-90 minutes as the typical case for Exchange, SharePoint, OneDrive and Teams, and budget up to 24 hours before concluding an event did not occur.",
+            "verified": true,
+            "lastVerified": "2026-09-06",
+            "severity": "critical",
+            "source": "https://learn.microsoft.com/en-us/purview/audit-solutions-overview"
+          },
+          {
+            "text": "Absence of evidence inside the latency window is not evidence of absence. Re-run scoping queries at T+24h before closing a containment decision.",
+            "verified": true,
+            "lastVerified": "2026-09-06",
+            "severity": "caution"
+          }
+        ],
+        "retention": [
+          {
+            "text": "Audit (Standard) default retention is 180 days for records generated on or after 17 October 2023. Records generated before that date were kept for 90 days.",
+            "verified": true,
+            "lastVerified": "2026-09-06",
+            "source": "https://learn.microsoft.com/en-us/purview/audit-log-retention-policies"
+          },
+          {
+            "text": "The one-year default retention policy applies per user, not per tenant: it only covers activity by users assigned an E5 / Office 365 E5 / Microsoft Purview Suite / E5 eDiscovery and Audit licence, and only for the AzureActiveDirectory, Exchange, OneDrive and SharePoint workloads. In a mixed-licence tenant the window you actually have depends on which identity was compromised.",
+            "verified": true,
+            "lastVerified": "2026-09-06",
+            "severity": "critical",
+            "source": "https://learn.microsoft.com/en-us/purview/audit-log-retention-policies"
+          },
+          {
+            "text": "Audit records are never generated retroactively. Assigning a licence or enabling an audit action mid-investigation recovers nothing for the period before the change.",
+            "verified": true,
+            "lastVerified": "2026-09-06",
+            "severity": "critical"
+          }
+        ],
+        "dataGaps": [
+          {
+            "text": "Sync operations are only recorded when the mailbox is accessed by a desktop Outlook client for Windows or Mac, and carry no per-message detail. Where a Sync record exists, treat the entire folder as potentially exposed rather than reporting zero items.",
+            "verified": true,
+            "lastVerified": "2026-09-06",
+            "severity": "critical",
+            "source": "https://learn.microsoft.com/en-us/purview/audit-log-investigate-accounts"
+          },
+          {
+            "text": "Audit throttling above roughly 1,000 MailItemsAccessed records in 24 hours suppresses further recording for 24 hours. High-volume exfiltration degrades its own evidence.",
+            "verified": true,
+            "lastVerified": "2026-09-06",
+            "severity": "critical",
+            "source": "https://learn.microsoft.com/en-us/purview/audit-log-investigate-accounts"
+          },
+          {
+            "text": "OWA and SharePoint search-term auditing (SearchQueryInitiated) is Audit (Premium) and is not enabled by default. If you want to know what the attacker searched for, it has to have been turned on beforehand.",
+            "verified": true,
+            "lastVerified": "2026-09-06",
+            "severity": "caution"
+          }
+        ],
+        "collectionPriority": "Run the throttle check first, then acquire the full window via Graph if the mailbox is high-volume. Only then flatten to the item list. Establishing whether the record is complete costs minutes and changes what you are allowed to conclude."
+      },
+      "crossValidation": {
+        "correlations": [
+          {
+            "artifact": "Entra ID interactive sign-ins",
+            "platform": "sentinel",
+            "table": "SigninLogs",
+            "pivot": "IPAddress and UserPrincipalName, bounded to the access window",
+            "why": "Establishes whether the mailbox access maps to an authenticated interactive session, and surfaces the conditional access and MFA posture at the time.",
+            "notes": [
+              {
+                "text": "Table name is SigninLogs with a lowercase i. SignInLogs does not exist and will fail silently in a joined query as an unresolved entity.",
+                "verified": true,
+                "lastVerified": "2026-09-06",
+                "severity": "caution"
+              }
+            ]
+          },
+          {
+            "artifact": "Entra ID non-interactive sign-ins",
+            "platform": "sentinel",
+            "table": "AADNonInteractiveUserSignInLogs",
+            "pivot": "UserPrincipalName and AppDisplayName",
+            "why": "Token-refresh and client-driven mail access frequently appears here and nowhere else. Absence from SigninLogs is not absence of access."
+          },
+          {
+            "artifact": "Service principal sign-ins",
+            "platform": "sentinel",
+            "table": "AADServicePrincipalSignInLogs",
+            "pivot": "AppId from the audit record",
+            "why": "Where AppId is populated, this is where the application identity resolves. Consent-grant abuse ends here rather than in user sign-in telemetry."
+          },
+          {
+            "artifact": "Defender for Office email telemetry",
+            "platform": "defender-xdr",
+            "table": "EmailEvents",
+            "pivot": "InternetMessageId from FolderItems",
+            "why": "Turns a list of message IDs into subjects, senders, recipients and attachment detail, which is what a notification assessment actually needs."
+          }
+        ]
+      }
+    },
+    {
+      "id": "inbox-rules-and-forwarding",
+      "title": "Malicious inbox rules, forwarding and message hiding",
+      "summary": "Detect persistence and concealment rules across both creation paths, including the client-side path most queries miss.",
+      "overview": {
+        "context": "Rules are the cheapest persistence and concealment mechanism in Exchange Online. They survive password resets, need no elevated privilege, and are frequently the only remaining artifact once a session has been revoked. The recurring failure in detection content is querying only the cmdlet path, which silently misses every rule created through an Outlook client.",
+        "actorBehavior": [
+          "Creates a rule forwarding or redirecting mail to an external address controlled by the actor.",
+          "Creates a concealment rule that moves messages matching finance keywords to a rarely-viewed folder such as RSS Feeds, marks them read and deletes them, so the legitimate owner never sees the thread.",
+          "Sets mailbox-level forwarding via Set-Mailbox rather than a rule, which does not appear in inbox rule enumeration at all.",
+          "Deletes the rule after the fraudulent transaction completes, leaving only the audit record."
+        ],
+        "triageQuestions": [
+          "Do rules exist on both the ExchangeAdmin and ExchangeItem paths for this mailbox?",
+          "Is there mailbox-level forwarding set independently of any rule?",
+          "Do the rule conditions reference finance or authentication keywords?",
+          "Was the rule created from the same client and IP as the suspicious authentication?"
+        ],
+        "mitre": [
+          {
+            "id": "T1114.003",
+            "role": "primary",
+            "note": "Forwarding and redirect rules for ongoing mail collection."
+          },
+          {
+            "id": "T1564.008",
+            "role": "primary",
+            "note": "Move, mark-read and delete rules used to hide the actor activity from the owner."
+          },
+          {
+            "id": "T1098.002",
+            "role": "supporting",
+            "note": "Where the rule is paired with a delegate permission grant."
+          }
+        ],
+        "ual": {
+          "workloads": [
+            "Exchange"
+          ],
+          "recordTypeIds": [
+            1,
+            2
+          ],
+          "operations": [
+            {
+              "name": "New-InboxRule",
+              "recordTypeId": 1,
+              "note": "Rule created via PowerShell, EWS or Graph. Detail lives in Parameters."
+            },
+            {
+              "name": "Set-InboxRule",
+              "recordTypeId": 1,
+              "note": "Existing rule modified. Easy to miss when only creation is monitored."
+            },
+            {
+              "name": "UpdateInboxRules",
+              "recordTypeId": 2,
+              "note": "Rule created or changed from an Outlook client. Detail lives in OperationProperties, not Parameters. This is the path most detection content omits."
+            },
+            {
+              "name": "Set-Mailbox",
+              "recordTypeId": 1,
+              "note": "Mailbox-level forwarding via ForwardingSmtpAddress or ForwardingAddress. Not a rule and not returned by Get-InboxRule."
+            },
+            {
+              "name": "New-TransportRule",
+              "recordTypeId": 1,
+              "note": "Tenant-wide transport rule. Far higher blast radius than a mailbox rule and warrants separate escalation."
+            }
+          ]
+        },
+        "access": {
+          "auditTier": "standard",
+          "licenseNotes": [
+            {
+              "text": "Rule creation and modification events are Audit (Standard). No premium licensing dependency.",
+              "verified": true,
+              "lastVerified": "2026-09-06"
+            }
+          ],
+          "rbac": [
+            {
+              "text": "View-Only Audit Logs or Audit Logs role in Exchange Online for retrieval. Removing a discovered rule additionally requires a role with mailbox configuration rights, which should be a separate, logged action.",
+              "verified": true,
+              "lastVerified": "2026-09-06",
+              "source": "https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/search-unifiedauditlog"
+            }
+          ]
+        }
+      },
+      "acquisition": {
+        "methods": [
+          {
+            "id": "exo-rules",
+            "title": "Rule and forwarding acquisition across both paths",
+            "transport": "exo-powershell",
+            "status": {
+              "text": "Standard cmdlet path. Post-2025 HighCompleteness behaviour applies here as it does to all Search-UnifiedAuditLog queries, though rule events are low-volume enough that throttling is rarely the constraint.",
+              "verified": true,
+              "lastVerified": "2026-09-06",
+              "source": "https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/search-unifiedauditlog"
+            },
+            "params": [
+              {
+                "name": "StartDate",
+                "type": "date",
+                "label": "Window start (UTC)",
+                "default": "2026-08-01T00:00:00Z"
+              },
+              {
+                "name": "EndDate",
+                "type": "date",
+                "label": "Window end (UTC)",
+                "default": "2026-09-01T00:00:00Z"
+              },
+              {
+                "name": "TargetUpn",
+                "type": "string",
+                "label": "Target mailbox UPN (blank for tenant-wide)",
+                "default": "jsmith@contoso.com"
+              },
+              {
+                "name": "OutputPath",
+                "type": "path",
+                "label": "Output directory",
+                "default": "C:\\\\IR\\\\UAL"
+              }
+            ],
+            "template": "#requires -Modules ExchangeOnlineManagement\n<#\n    Inbox rule, forwarding and transport rule acquisition.\n    Queries BOTH creation paths. Querying only ExchangeAdmin misses every rule\n    created from an Outlook client, which in practice is most of them.\n#>\n[CmdletBinding()]\nparam(\n    [datetime] $StartDate  = '{{StartDate}}',\n    [datetime] $EndDate    = '{{EndDate}}',\n    [string]   $TargetUpn  = '{{TargetUpn}}',\n    [string]   $OutputPath = '{{OutputPath}}'\n)\n\n$ErrorActionPreference = 'Stop'\nif (-not (Get-ConnectionInformation -ErrorAction SilentlyContinue)) {\n    Connect-ExchangeOnline -ShowBanner:$false\n}\n\n$common = @{ StartDate = $StartDate; EndDate = $EndDate; ResultSize = 5000; SessionCommand = 'ReturnLargeSet' }\nif ($TargetUpn) { $common['UserIds'] = $TargetUpn }\n\n# Path A - cmdlet, EWS and Graph originated\n$adminPath = Search-UnifiedAuditLog @common -RecordType ExchangeAdmin `\n                -Operations 'New-InboxRule','Set-InboxRule','Set-Mailbox','New-TransportRule','Set-TransportRule'\n\n# Path B - Outlook client originated\n$clientPath = Search-UnifiedAuditLog @common -RecordType ExchangeItem `\n                -Operations 'UpdateInboxRules'\n\n$all = @($adminPath) + @($clientPath) | Sort-Object -Property Identity -Unique\n\n$parsed = foreach ($r in $all) {\n    $d = $r.AuditData | ConvertFrom-Json\n    # Rule detail lives in different places depending on the creation path.\n    $detail = if ($d.Parameters) { ($d.Parameters | ForEach-Object { \"$($_.Name)=$($_.Value)\" }) -join '; ' }\n              else               { ($d.OperationProperties | ForEach-Object { \"$($_.Name)=$($_.Value)\" }) -join '; ' }\n\n    [pscustomobject]@{\n        CreationTime = $d.CreationTime\n        Actor        = $d.UserId\n        Mailbox      = $d.MailboxOwnerUPN\n        Operation    = $d.Operation\n        RecordType   = $d.RecordType\n        ClientIP     = $d.ClientIP ?? $d.ClientIPAddress\n        Detail       = $detail\n        Forwarding   = $detail -match 'ForwardTo|ForwardAsAttachmentTo|RedirectTo|ForwardingSmtpAddress'\n        Concealment  = $detail -match 'DeleteMessage|MarkAsRead|RSS Feeds|Conversation History|Deleted Items'\n    }\n}\n\n# Current state, for rules that still exist. The audit log shows history;\n# this shows what is live right now, including anything created before the window.\n$liveState = if ($TargetUpn) {\n    [pscustomobject]@{\n        InboxRules        = Get-InboxRule -Mailbox $TargetUpn | Select-Object Name, Enabled, ForwardTo, ForwardAsAttachmentTo, RedirectTo, MoveToFolder, DeleteMessage, MarkAsRead\n        MailboxForwarding = Get-Mailbox   -Identity $TargetUpn | Select-Object ForwardingSmtpAddress, ForwardingAddress, DeliverToMailboxAndForward\n    }\n}\n\nNew-Item -ItemType Directory -Path $OutputPath -Force | Out-Null\n$stamp = Get-Date -Format 'yyyyMMdd-HHmmss'\n$parsed    | Export-Csv       (Join-Path $OutputPath \"Rules-audit-$stamp.csv\") -NoTypeInformation -Encoding utf8\n$liveState | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $OutputPath \"Rules-live-$stamp.json\") -Encoding utf8\n\nWrite-Host ('{0} rule/forwarding events. Forwarding: {1}. Concealment: {2}.' -f $parsed.Count,\n    ($parsed | Where-Object Forwarding).Count, ($parsed | Where-Object Concealment).Count)",
+            "notes": [
+              {
+                "text": "Always pull current state alongside audit history. A rule created before the acquisition window will not appear in the audit results but is still active on the mailbox.",
+                "verified": true,
+                "lastVerified": "2026-09-06",
+                "severity": "critical"
+              },
+              {
+                "text": "Get-InboxRule does not return mailbox-level forwarding. Get-Mailbox is required for ForwardingSmtpAddress and ForwardingAddress.",
+                "verified": true,
+                "lastVerified": "2026-09-06",
+                "severity": "caution"
+              }
+            ]
+          }
+        ]
+      },
+      "hunting": {
+        "queries": [
+          {
+            "id": "rules-sentinel",
+            "title": "Suspicious rules across both creation paths",
+            "platform": "sentinel",
+            "table": "OfficeActivity",
+            "purpose": "detect",
+            "query": "// Inbox rules are created through two different paths that land in two different\n// RecordTypes. Querying only one is the most common way analysts miss half the rules.\n//   Outlook desktop / OWA client  -> UpdateInboxRules  (RecordType ExchangeItem)\n//   PowerShell / EWS / Graph      -> New-InboxRule     (RecordType ExchangeAdmin)\nlet lookback = 30d;\nOfficeActivity\n| where TimeGenerated > ago(lookback)\n| where (RecordType == 'ExchangeAdmin' and Operation in ('New-InboxRule', 'Set-InboxRule', 'Set-Mailbox'))\n     or (RecordType == 'ExchangeItem'  and Operation == 'UpdateInboxRules')\n| extend RuleDetail = strcat(tostring(Parameters), ' ', tostring(OperationProperties))\n| where Operation != 'Set-Mailbox' or RuleDetail has_any ('ForwardingSmtpAddress', 'ForwardingAddress', 'DeliverToMailboxAndForward')\n| extend Markers = set_difference(pack_array(\n      iff(RuleDetail has_any ('ForwardTo', 'ForwardAsAttachmentTo', 'RedirectTo', 'ForwardingSmtpAddress'), 'external-forward', ''),\n      iff(RuleDetail has_any ('RSS Feeds', 'RSS Subscriptions', 'Conversation History', 'Deleted Items', 'Junk Email', 'Archive'), 'low-visibility-folder', ''),\n      iff(RuleDetail has 'DeleteMessage', 'auto-delete', ''),\n      iff(RuleDetail has 'MarkAsRead', 'mark-read', ''),\n      iff(RuleDetail has_any ('invoice', 'payment', 'wire', 'bank', 'remittance', 'ACH', 'IBAN'), 'finance-keyword', '')\n  ), dynamic(['']))\n| where array_length(Markers) > 0\n| project TimeGenerated, UserId, MailboxOwnerUPN, Operation, RecordType, ClientIP, Markers, RuleDetail\n| order by TimeGenerated desc",
+            "notes": [
+              {
+                "text": "The two-path union is the point of this query. A query restricted to RecordType ExchangeAdmin will look clean on a mailbox with an active concealment rule created in Outlook.",
+                "verified": true,
+                "lastVerified": "2026-09-06",
+                "severity": "critical"
+              }
+            ]
+          },
+          {
+            "id": "rules-xdr",
+            "title": "Rule and forwarding changes with client context",
+            "platform": "defender-xdr",
+            "table": "CloudAppEvents",
+            "purpose": "detect",
+            "query": "let lookback = 30d;\nCloudAppEvents\n| where Timestamp > ago(lookback)\n| where ActionType in ('New-InboxRule', 'Set-InboxRule', 'UpdateInboxRules', 'Set-Mailbox')\n| extend RuleDetail = strcat(tostring(RawEventData.Parameters), ' ', tostring(RawEventData.OperationProperties))\n| where RuleDetail has_any ('ForwardTo', 'ForwardAsAttachmentTo', 'RedirectTo', 'ForwardingSmtpAddress', 'DeleteMessage', 'MoveToFolder')\n| project Timestamp, AccountDisplayName, ActionType, IPAddress, UserAgent,\n          Mailbox = tostring(RawEventData.MailboxOwnerUPN), RuleDetail\n| order by Timestamp desc",
+            "notes": [
+              {
+                "text": "IPAddress and UserAgent here support pivoting straight to the originating session, which OfficeActivity does not expose as cleanly.",
+                "verified": true,
+                "lastVerified": "2026-09-06"
+              }
+            ]
+          }
+        ]
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "Parameters",
+            "type": "array",
+            "description": "Name/Value pairs of the cmdlet arguments. Where rule conditions and actions live for the ExchangeAdmin path.",
+            "officeActivityColumn": "Parameters",
+            "evidentialValue": "high"
+          },
+          {
+            "name": "OperationProperties",
+            "type": "array",
+            "description": "Where rule detail lives for the client-side UpdateInboxRules path. Structurally different from Parameters and requires separate parsing.",
+            "officeActivityColumn": "OperationProperties",
+            "gotcha": "Code that only parses Parameters will produce empty rule detail for every client-created rule, which reads as a clean result rather than a parsing failure.",
+            "evidentialValue": "high"
+          },
+          {
+            "name": "ModifiedProperties",
+            "type": "array",
+            "description": "Name, NewValue and OldValue for configuration changes. Populated for Set-Mailbox forwarding changes.",
+            "officeActivityColumn": "OfficeObjectId",
+            "gotcha": "Not consistently projected into OfficeActivity for Exchange records. Verify with getschema.",
+            "evidentialValue": "high"
+          },
+          {
+            "name": "ObjectId",
+            "type": "string",
+            "description": "Target of the operation, typically the mailbox or rule identity.",
+            "officeActivityColumn": "OfficeObjectId",
+            "evidentialValue": "medium"
+          },
+          {
+            "name": "ClientIP",
+            "type": "string",
+            "description": "Origin of the change.",
+            "officeActivityColumn": "ClientIP",
+            "gotcha": "May include a port. Exchange and SharePoint populate this field with different formats.",
+            "evidentialValue": "high"
+          },
+          {
+            "name": "ResultStatus",
+            "type": "string",
+            "description": "Whether the operation succeeded. Failed attempts are themselves signal during an active intrusion.",
+            "officeActivityColumn": "ResultStatus",
+            "evidentialValue": "medium"
+          },
+          {
+            "name": "ExternalAccess",
+            "type": "bool",
+            "description": "True when the operation originated outside the tenant, including Microsoft datacentre administrative access.",
+            "officeActivityColumn": "ExternalAccess",
+            "evidentialValue": "medium"
+          }
+        ]
+      },
+      "caveats": {
+        "latency": [
+          {
+            "text": "Microsoft publishes no guaranteed ingestion SLA. It withdrew its fixed per-workload latency table in 2022. Treat 60-90 minutes as the typical case for Exchange, SharePoint, OneDrive and Teams, and budget up to 24 hours before concluding an event did not occur.",
+            "verified": true,
+            "lastVerified": "2026-09-06",
+            "severity": "critical",
+            "source": "https://learn.microsoft.com/en-us/purview/audit-solutions-overview"
+          },
+          {
+            "text": "Absence of evidence inside the latency window is not evidence of absence. Re-run scoping queries at T+24h before closing a containment decision.",
+            "verified": true,
+            "lastVerified": "2026-09-06",
+            "severity": "caution"
+          }
+        ],
+        "retention": [
+          {
+            "text": "Audit (Standard) default retention is 180 days for records generated on or after 17 October 2023. Records generated before that date were kept for 90 days.",
+            "verified": true,
+            "lastVerified": "2026-09-06",
+            "source": "https://learn.microsoft.com/en-us/purview/audit-log-retention-policies"
+          },
+          {
+            "text": "The one-year default retention policy applies per user, not per tenant: it only covers activity by users assigned an E5 / Office 365 E5 / Microsoft Purview Suite / E5 eDiscovery and Audit licence, and only for the AzureActiveDirectory, Exchange, OneDrive and SharePoint workloads. In a mixed-licence tenant the window you actually have depends on which identity was compromised.",
+            "verified": true,
+            "lastVerified": "2026-09-06",
+            "severity": "critical",
+            "source": "https://learn.microsoft.com/en-us/purview/audit-log-retention-policies"
+          },
+          {
+            "text": "Audit records are never generated retroactively. Assigning a licence or enabling an audit action mid-investigation recovers nothing for the period before the change.",
+            "verified": true,
+            "lastVerified": "2026-09-06",
+            "severity": "critical"
+          }
+        ],
+        "dataGaps": [
+          {
+            "text": "Rules created before the retention window, or before auditing was enabled, appear only in current mailbox state and never in the audit log. Always pull both.",
+            "verified": true,
+            "lastVerified": "2026-09-06",
+            "severity": "critical"
+          },
+          {
+            "text": "Rule deletion removes the live artifact but not the audit record. A mailbox that enumerates clean today can still show a full rule lifecycle in the log.",
+            "verified": true,
+            "lastVerified": "2026-09-06",
+            "severity": "caution"
+          },
+          {
+            "text": "Transport rules operate tenant-wide and are configured entirely outside mailbox rule enumeration. A mailbox-scoped investigation will not surface them.",
+            "verified": true,
+            "lastVerified": "2026-09-06",
+            "severity": "caution"
+          }
+        ],
+        "collectionPriority": "Pull current state first, because it is the artifact that can still be changed by the actor. Audit history is immutable and can wait."
+      },
+      "crossValidation": {
+        "correlations": [
+          {
+            "artifact": "Entra ID sign-ins",
+            "platform": "sentinel",
+            "table": "SigninLogs",
+            "pivot": "ClientIP and UserPrincipalName at the rule creation timestamp",
+            "why": "Establishes whether the rule was created by the legitimate owner or from the compromising session."
+          },
+          {
+            "artifact": "Defender for Office email flow",
+            "platform": "defender-xdr",
+            "table": "EmailEvents",
+            "pivot": "Recipient address extracted from the forwarding rule",
+            "why": "Quantifies what actually left the tenant while the rule was active, which the rule definition alone does not tell you."
+          },
+          {
+            "artifact": "Exchange message trace",
+            "platform": "portal",
+            "table": null,
+            "pivot": "Sender, recipient and date range",
+            "why": "Confirms delivery to the external forwarding target and provides the volume figure a notification assessment needs."
+          }
+        ]
+      }
+    },
+    {
+      "id": "delegate-and-permission-grants",
+      "title": "Delegate, folder and send-as permission grants",
+      "summary": "Detect the grant, then prove whether it was exercised.",
+      "overview": {
+        "context": "Permission grants are quieter persistence than rules: they place a second identity on a mailbox and require no ongoing action from the actor. The grant and the use are separate events in separate RecordTypes, and reporting the grant without establishing whether it was exercised leaves the exposure question unanswered.",
+        "actorBehavior": [
+          "Grants FullAccess or SendAs on a target mailbox to a controlled or already-compromised account.",
+          "Grants folder-level permission to Default or Anonymous, which exposes the folder broadly without naming any suspicious principal.",
+          "Sets GrantSendOnBehalfTo, enabling impersonation for payment redirection without full mailbox access.",
+          "Removes the permission after use, leaving only the grant and revoke pair in the audit record."
+        ],
+        "triageQuestions": [
+          "Which principal received the grant, and is it an account the actor controls?",
+          "Was the grant to Default or Anonymous rather than a named user?",
+          "Is there delegate-context mailbox access following the grant?",
+          "Was the grant subsequently removed, and by whom?"
+        ],
+        "mitre": [
+          {
+            "id": "T1098.002",
+            "role": "primary",
+            "note": "Additional email delegate permissions as persistence."
+          },
+          {
+            "id": "T1078.004",
+            "role": "supporting",
+            "note": "The grant is made using a valid, already-compromised cloud identity."
+          },
+          {
+            "id": "T1114.002",
+            "role": "supporting",
+            "note": "Where the grant is exercised to collect mail."
+          }
+        ],
+        "ual": {
+          "workloads": [
+            "Exchange"
+          ],
+          "recordTypeIds": [
+            1,
+            2
+          ],
+          "operations": [
+            {
+              "name": "Add-MailboxPermission",
+              "recordTypeId": 1,
+              "note": "Mailbox-level rights, typically FullAccess."
+            },
+            {
+              "name": "Add-RecipientPermission",
+              "recordTypeId": 1,
+              "note": "SendAs. Enables outbound impersonation."
+            },
+            {
+              "name": "Add-MailboxFolderPermission",
+              "recordTypeId": 1,
+              "note": "Folder-scoped. Watch for Default and Anonymous as the grantee."
+            },
+            {
+              "name": "Set-Mailbox",
+              "recordTypeId": 1,
+              "note": "GrantSendOnBehalfTo. Impersonation without mailbox read access."
+            },
+            {
+              "name": "FolderBind",
+              "recordTypeId": 2,
+              "note": "Evidence the grant was used. LogonType 2 indicates delegate context."
+            },
+            {
+              "name": "SendAs",
+              "recordTypeId": 2,
+              "note": "Message sent under the target identity."
+            },
+            {
+              "name": "SendOnBehalf",
+              "recordTypeId": 2,
+              "note": "Message sent on behalf of the target identity."
+            }
+          ]
+        },
+        "access": {
+          "auditTier": "standard",
+          "licenseNotes": [
+            {
+              "text": "Permission grant events are Audit (Standard). The follow-on FolderBind and SendAs evidence is also Standard.",
+              "verified": true,
+              "lastVerified": "2026-09-06"
+            }
+          ],
+          "rbac": [
+            {
+              "text": "View-Only Audit Logs or Audit Logs role in Exchange Online.",
+              "verified": true,
+              "lastVerified": "2026-09-06",
+              "source": "https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/search-unifiedauditlog"
+            }
+          ]
+        }
+      },
+      "acquisition": {
+        "methods": [
+          {
+            "id": "exo-delegate",
+            "title": "Permission grants plus current effective permissions",
+            "transport": "exo-powershell",
+            "status": {
+              "text": "Standard cmdlet path with post-2025 HighCompleteness behaviour applying to the audit query.",
+              "verified": true,
+              "lastVerified": "2026-09-06",
+              "source": "https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/search-unifiedauditlog"
+            },
+            "params": [
+              {
+                "name": "StartDate",
+                "type": "date",
+                "label": "Window start (UTC)",
+                "default": "2026-08-01T00:00:00Z"
+              },
+              {
+                "name": "EndDate",
+                "type": "date",
+                "label": "Window end (UTC)",
+                "default": "2026-09-01T00:00:00Z"
+              },
+              {
+                "name": "TargetUpn",
+                "type": "string",
+                "label": "Target mailbox UPN",
+                "default": "jsmith@contoso.com"
+              },
+              {
+                "name": "OutputPath",
+                "type": "path",
+                "label": "Output directory",
+                "default": "C:\\\\IR\\\\UAL"
+              }
+            ],
+            "template": "#requires -Modules ExchangeOnlineManagement\n<#\n    Delegate, folder and send-as permission acquisition.\n    Captures the grant history AND the current effective permission set, because a\n    grant made before the retention window is invisible in the audit log alone.\n#>\n[CmdletBinding()]\nparam(\n    [datetime] $StartDate  = '{{StartDate}}',\n    [datetime] $EndDate    = '{{EndDate}}',\n    [string]   $TargetUpn  = '{{TargetUpn}}',\n    [string]   $OutputPath = '{{OutputPath}}'\n)\n\n$ErrorActionPreference = 'Stop'\nif (-not (Get-ConnectionInformation -ErrorAction SilentlyContinue)) {\n    Connect-ExchangeOnline -ShowBanner:$false\n}\n\n# --- Grant history ----------------------------------------------------------\n$grants = Search-UnifiedAuditLog -StartDate $StartDate -EndDate $EndDate `\n            -RecordType ExchangeAdmin -ResultSize 5000 -SessionCommand ReturnLargeSet `\n            -Operations 'Add-MailboxPermission','Remove-MailboxPermission', `\n                        'Add-RecipientPermission','Remove-RecipientPermission', `\n                        'Add-MailboxFolderPermission','Set-MailboxFolderPermission', `\n                        'Set-Mailbox' |\n          Sort-Object -Property Identity -Unique\n\n$parsedGrants = foreach ($r in $grants) {\n    $d = $r.AuditData | ConvertFrom-Json\n    $p = @{}\n    foreach ($kv in $d.Parameters) { $p[$kv.Name] = $kv.Value }\n\n    if ($d.Operation -eq 'Set-Mailbox' -and -not $p.ContainsKey('GrantSendOnBehalfTo')) { continue }\n\n    [pscustomobject]@{\n        CreationTime = $d.CreationTime\n        Actor        = $d.UserId\n        Operation    = $d.Operation\n        TargetObject = $d.ObjectId\n        Grantee      = $p['User'] ?? $p['Trustee'] ?? $p['GrantSendOnBehalfTo']\n        Rights       = $p['AccessRights'] ?? $p['AccessRightsRaw'] ?? $p['Permissions']\n        ClientIP     = $d.ClientIP ?? $d.ClientIPAddress\n        BroadGrant   = ($p['User'] ?? $p['Trustee']) -in @('Default','Anonymous','Everyone')\n    }\n}\n\n# --- Current effective permissions -----------------------------------------\n$current = [pscustomobject]@{\n    MailboxPermissions   = Get-MailboxPermission   -Identity $TargetUpn |\n                             Where-Object { -not $_.IsInherited -and $_.User -notlike 'NT AUTHORITY\\\\*' }\n    RecipientPermissions = Get-RecipientPermission -Identity $TargetUpn |\n                             Where-Object { $_.Trustee -ne 'NT AUTHORITY\\\\SELF' }\n    SendOnBehalf         = (Get-Mailbox -Identity $TargetUpn).GrantSendOnBehalfTo\n    FolderPermissions    = Get-MailboxFolderPermission -Identity \"$TargetUpn:\\\\Inbox\" -ErrorAction SilentlyContinue |\n                             Where-Object { $_.AccessRights -notcontains 'None' }\n}\n\nNew-Item -ItemType Directory -Path $OutputPath -Force | Out-Null\n$stamp = Get-Date -Format 'yyyyMMdd-HHmmss'\n$parsedGrants | Export-Csv (Join-Path $OutputPath \"Delegate-grants-$stamp.csv\") -NoTypeInformation -Encoding utf8\n$current | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $OutputPath \"Delegate-current-$stamp.json\") -Encoding utf8\n\n$broad = @($parsedGrants | Where-Object BroadGrant)\nif ($broad.Count -gt 0) {\n    Write-Warning ('{0} grant(s) to Default/Anonymous/Everyone. These expose the mailbox without naming a suspicious principal.' -f $broad.Count)\n}",
+            "notes": [
+              {
+                "text": "Filter out inherited permissions and NT AUTHORITY\\\\SELF or the current-state output is dominated by noise that hides the one entry that matters.",
+                "verified": true,
+                "lastVerified": "2026-09-06"
+              },
+              {
+                "text": "Folder permissions must be enumerated per folder. Inbox alone is a triage shortcut, not a complete answer.",
+                "verified": true,
+                "lastVerified": "2026-09-06",
+                "severity": "caution"
+              }
+            ]
+          }
+        ]
+      },
+      "hunting": {
+        "queries": [
+          {
+            "id": "delegate-grants",
+            "title": "Permission grants, flagging broad-audience principals",
+            "platform": "sentinel",
+            "table": "OfficeActivity",
+            "purpose": "detect",
+            "query": "// Delegate and folder-permission grants, plus the broad-audience grants that are\n// easy to miss because they name a principal that is not a user.\nlet lookback = 30d;\nOfficeActivity\n| where TimeGenerated > ago(lookback)\n| where RecordType == 'ExchangeAdmin'\n| where Operation in ('Add-MailboxPermission', 'Add-RecipientPermission',\n                      'Add-MailboxFolderPermission', 'Set-MailboxFolderPermission', 'Set-Mailbox')\n| extend P = tostring(Parameters)\n| where Operation != 'Set-Mailbox' or P has 'GrantSendOnBehalfTo'\n| extend BroadGrant   = P has_any ('Default', 'Anonymous', 'Everyone'),\n         HighPrivRole = P has_any ('FullAccess', 'SendAs', 'Owner', 'PublishingEditor', 'Editor')\n| project TimeGenerated, Actor = UserId, Target = OfficeObjectId, Operation,\n          ClientIP, BroadGrant, HighPrivRole, P\n| order by TimeGenerated desc",
+            "notes": [
+              {
+                "text": "Grants to Default or Anonymous are the ones that evade principal-based review, because there is no attacker-controlled account name to spot.",
+                "verified": true,
+                "lastVerified": "2026-09-06",
+                "severity": "caution"
+              }
+            ]
+          },
+          {
+            "id": "delegate-use",
+            "title": "Delegate-context access: was the grant exercised?",
+            "platform": "defender-xdr",
+            "table": "CloudAppEvents",
+            "purpose": "pivot",
+            "query": "// The grant is the setup; this is the use. Delegate-context mailbox access is\n// the evidence that a permission grant was actually exercised.\nlet lookback = 30d;\nCloudAppEvents\n| where Timestamp > ago(lookback)\n| where ActionType in ('FolderBind', 'MailItemsAccessed', 'Send', 'SendAs', 'SendOnBehalf')\n| extend LogonType = tostring(RawEventData.LogonType),\n         Mailbox   = tostring(RawEventData.MailboxOwnerUPN),\n         Actor     = tostring(RawEventData.UserId)\n| where LogonType == 'Delegate' or LogonType == '2'\n| where Actor !~ Mailbox\n| summarize Actions = count(), FirstSeen = min(Timestamp), LastSeen = max(Timestamp),\n            Operations = make_set(ActionType, 10)\n    by Actor, Mailbox, IPAddress\n| order by Actions desc",
+            "notes": [
+              {
+                "text": "LogonType may surface as the string Delegate or the integer 2 depending on record version. The query accepts both rather than assuming one.",
+                "verified": true,
+                "lastVerified": "2026-09-06",
+                "severity": "caution"
+              }
+            ]
+          }
+        ]
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "Parameters",
+            "type": "array",
+            "description": "Cmdlet arguments. User or Trustee holds the grantee; AccessRights holds the permission level.",
+            "officeActivityColumn": "Parameters",
+            "gotcha": "The grantee key name differs by cmdlet: Add-MailboxPermission uses User, Add-RecipientPermission uses Trustee. Parsing only one silently drops half the grants.",
+            "evidentialValue": "high"
+          },
+          {
+            "name": "ObjectId",
+            "type": "string",
+            "description": "Mailbox the permission was granted on.",
+            "officeActivityColumn": "OfficeObjectId",
+            "evidentialValue": "high"
+          },
+          {
+            "name": "UserId",
+            "type": "string",
+            "description": "Identity that made the grant, which is not the identity that received it.",
+            "officeActivityColumn": "UserId",
+            "evidentialValue": "high"
+          },
+          {
+            "name": "LogonType",
+            "type": "int",
+            "description": "On the follow-on access records: 0 Owner, 1 Admin, 2 Delegate. Value 2 is the evidence the grant was used.",
+            "officeActivityColumn": "Logon_Type",
+            "evidentialValue": "high"
+          },
+          {
+            "name": "MailboxOwnerUPN",
+            "type": "string",
+            "description": "Owner of the accessed mailbox. Compare against UserId to identify delegate access.",
+            "officeActivityColumn": "MailboxOwnerUPN",
+            "evidentialValue": "high"
+          },
+          {
+            "name": "ResultStatus",
+            "type": "string",
+            "description": "Success or failure of the grant. Failed grants indicate attempted escalation.",
+            "officeActivityColumn": "ResultStatus",
+            "evidentialValue": "medium"
+          },
+          {
+            "name": "ExternalAccess",
+            "type": "bool",
+            "description": "Whether the operation originated outside the tenant.",
+            "officeActivityColumn": "ExternalAccess",
+            "evidentialValue": "medium"
+          }
+        ]
+      },
+      "caveats": {
+        "latency": [
+          {
+            "text": "Microsoft publishes no guaranteed ingestion SLA. It withdrew its fixed per-workload latency table in 2022. Treat 60-90 minutes as the typical case for Exchange, SharePoint, OneDrive and Teams, and budget up to 24 hours before concluding an event did not occur.",
+            "verified": true,
+            "lastVerified": "2026-09-06",
+            "severity": "critical",
+            "source": "https://learn.microsoft.com/en-us/purview/audit-solutions-overview"
+          },
+          {
+            "text": "Absence of evidence inside the latency window is not evidence of absence. Re-run scoping queries at T+24h before closing a containment decision.",
+            "verified": true,
+            "lastVerified": "2026-09-06",
+            "severity": "caution"
+          }
+        ],
+        "retention": [
+          {
+            "text": "Audit (Standard) default retention is 180 days for records generated on or after 17 October 2023. Records generated before that date were kept for 90 days.",
+            "verified": true,
+            "lastVerified": "2026-09-06",
+            "source": "https://learn.microsoft.com/en-us/purview/audit-log-retention-policies"
+          },
+          {
+            "text": "The one-year default retention policy applies per user, not per tenant: it only covers activity by users assigned an E5 / Office 365 E5 / Microsoft Purview Suite / E5 eDiscovery and Audit licence, and only for the AzureActiveDirectory, Exchange, OneDrive and SharePoint workloads. In a mixed-licence tenant the window you actually have depends on which identity was compromised.",
+            "verified": true,
+            "lastVerified": "2026-09-06",
+            "severity": "critical",
+            "source": "https://learn.microsoft.com/en-us/purview/audit-log-retention-policies"
+          },
+          {
+            "text": "Audit records are never generated retroactively. Assigning a licence or enabling an audit action mid-investigation recovers nothing for the period before the change.",
+            "verified": true,
+            "lastVerified": "2026-09-06",
+            "severity": "critical"
+          }
+        ],
+        "dataGaps": [
+          {
+            "text": "Permissions granted before the retention window exist only in current state. Enumerating current permissions is mandatory, not supplementary.",
+            "verified": true,
+            "lastVerified": "2026-09-06",
+            "severity": "critical"
+          },
+          {
+            "text": "Grants made through the Exchange admin centre and grants made through PowerShell both surface as ExchangeAdmin cmdlet records, so the origin is not distinguishable from the Operation alone. Use ClientIP and the actor identity instead.",
+            "verified": true,
+            "lastVerified": "2026-09-06",
+            "severity": "caution"
+          },
+          {
+            "text": "Folder-level permissions are per folder. A tenant-wide sweep of Inbox permissions will not find a grant placed on a subfolder.",
+            "verified": true,
+            "lastVerified": "2026-09-06",
+            "severity": "caution"
+          }
+        ],
+        "collectionPriority": "Enumerate current effective permissions before anything else, then reconstruct the grant history, then establish use. Current state is the part an actor can still alter."
+      },
+      "crossValidation": {
+        "correlations": [
+          {
+            "artifact": "Entra ID audit log",
+            "platform": "sentinel",
+            "table": "AuditLogs",
+            "pivot": "Actor object ID and timestamp",
+            "why": "Correlates the mailbox grant with directory role assignments made in the same session. A grant paired with a role assignment is a different severity of incident.",
+            "notes": [
+              {
+                "text": "AuditLogs contains Entra ID directory activity only and carries no Exchange UAL data. It complements OfficeActivity rather than duplicating it.",
+                "verified": true,
+                "lastVerified": "2026-09-06",
+                "severity": "caution"
+              }
+            ]
+          },
+          {
+            "artifact": "Service principal sign-ins",
+            "platform": "sentinel",
+            "table": "AADServicePrincipalSignInLogs",
+            "pivot": "AppId where the grant was made by an application identity",
+            "why": "Grants made by an application rather than a user resolve here, not in user sign-in telemetry."
+          },
+          {
+            "artifact": "MailItemsAccessed scoping",
+            "platform": "defender-xdr",
+            "table": "CloudAppEvents",
+            "pivot": "Grantee identity as UserId, target mailbox as MailboxOwnerUPN",
+            "why": "Converts a permission grant into a concrete exposure statement by identifying what the delegate actually read. Cross-reference the mailitemsaccessed-scoping scenario."
+          }
+        ]
+      }
+    }
+  ]
+}

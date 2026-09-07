@@ -1,0 +1,261 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ironbranded.github.io/ual-framework/data/_schema.json",
+  "title": "UAL Framework category file",
+  "description": "One file per sidebar category. Each category contains one or more scenarios; each scenario renders the six-tab workspace. Semantic correctness (RecordType membership, MITRE membership, KQL/platform schema agreement, placeholder-identifier policy) is enforced by scripts/validate.mjs, not by this schema.",
+  "type": "object",
+  "required": ["id", "title", "order", "status", "workloads", "recordTypes", "scenarios"],
+  "additionalProperties": false,
+
+  "properties": {
+    "$schema":  { "type": "string" },
+    "id":       { "type": "string", "pattern": "^[a-z0-9-]+$", "description": "Must match the filename stem." },
+    "title":    { "type": "string" },
+    "order":    { "type": "integer", "minimum": 1, "description": "Sidebar position." },
+    "status":   { "enum": ["complete", "draft", "stub"], "description": "'stub' renders the Phase 2 placeholder pane. The renderer must never present a stub as finished content." },
+    "summary":  { "type": "string" },
+    "workloads": { "type": "array", "minItems": 1, "items": { "type": "string" }, "description": "Validated against taxonomy.workloads." },
+
+    "recordTypes": {
+      "type": "array",
+      "description": "Every RecordType this category touches. Stored as an id/member pair so the query builder can emit the integer for PowerShell/Graph and the member name for OfficeActivity.",
+      "items": {
+        "type": "object",
+        "required": ["id", "member"],
+        "additionalProperties": false,
+        "properties": {
+          "id":       { "type": "integer" },
+          "member":   { "type": "string" },
+          "role":     { "type": "string", "description": "Why this category cares about it." },
+          "verified": { "type": "boolean", "default": true }
+        }
+      }
+    },
+
+    "scenarios": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/scenario" }
+    }
+  },
+
+  "$defs": {
+    "claim": {
+      "description": "Any assertion that can go stale. lastVerified makes staleness visible instead of invisible — the validator warns past a threshold.",
+      "type": "object",
+      "required": ["text"],
+      "additionalProperties": false,
+      "properties": {
+        "text":         { "type": "string" },
+        "verified":     { "type": "boolean", "default": true, "description": "false renders a [VERIFY] badge in the UI. Prefer this over a confident-sounding guess." },
+        "source":       { "type": "string", "format": "uri" },
+        "lastVerified": { "type": "string", "format": "date" },
+        "severity":     { "enum": ["info", "caution", "critical"], "default": "info" }
+      }
+    },
+
+    "scenario": {
+      "type": "object",
+      "required": ["id", "title", "overview", "acquisition", "hunting", "schema", "caveats", "crossValidation"],
+      "additionalProperties": false,
+      "properties": {
+        "id":      { "type": "string", "pattern": "^[a-z0-9-]+$" },
+        "title":   { "type": "string" },
+        "summary": { "type": "string" },
+
+        "overview": {
+          "description": "Tab 1 — Overview & Triage.",
+          "type": "object",
+          "required": ["context", "mitre", "ual", "access"],
+          "additionalProperties": false,
+          "properties": {
+            "context":       { "type": "string" },
+            "actorBehavior": { "type": "array", "items": { "type": "string" } },
+            "triageQuestions": { "type": "array", "items": { "type": "string" }, "description": "What this scenario is supposed to answer. Keeps content honest about scope." },
+            "mitre": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["id", "role"],
+                "additionalProperties": false,
+                "properties": {
+                  "id":       { "type": "string", "pattern": "^T\\d{4}(\\.\\d{3})?$" },
+                  "role":     { "enum": ["primary", "supporting"] },
+                  "note":     { "type": "string" },
+                  "verified": { "type": "boolean", "default": true }
+                }
+              }
+            },
+            "ual": {
+              "type": "object",
+              "required": ["workloads", "recordTypeIds", "operations"],
+              "additionalProperties": false,
+              "properties": {
+                "workloads":     { "type": "array", "items": { "type": "string" } },
+                "recordTypeIds": { "type": "array", "items": { "type": "integer" } },
+                "operations": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["name", "recordTypeId"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "name":         { "type": "string" },
+                      "recordTypeId": { "type": "integer" },
+                      "note":         { "type": "string" },
+                      "verified":     { "type": "boolean", "default": true }
+                    }
+                  }
+                }
+              }
+            },
+            "access": {
+              "description": "Licensing and RBAC. Modelled per-user, not per-tenant — that distinction is the single most common source of wrong answers in this space.",
+              "type": "object",
+              "required": ["auditTier", "licenseNotes", "rbac"],
+              "additionalProperties": false,
+              "properties": {
+                "auditTier":    { "enum": ["standard", "premium", "mixed"] },
+                "licenseNotes": { "type": "array", "items": { "$ref": "#/$defs/claim" } },
+                "rbac":         { "type": "array", "items": { "$ref": "#/$defs/claim" } }
+              }
+            }
+          }
+        },
+
+        "acquisition": {
+          "description": "Tab 2 — Acquisition. Both the cmdlet path and the Graph path, each with its own current-status caveats.",
+          "type": "object",
+          "required": ["methods"],
+          "additionalProperties": false,
+          "properties": {
+            "methods": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["id", "title", "transport", "template"],
+                "additionalProperties": false,
+                "properties": {
+                  "id":        { "type": "string" },
+                  "title":     { "type": "string" },
+                  "transport": { "enum": ["exo-powershell", "graph-auditlogquery", "management-activity-api"] },
+                  "status":    { "$ref": "#/$defs/claim", "description": "Current API/cmdlet status. Surfaces things like beta-vs-GA regressions." },
+                  "params": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": ["name", "type"],
+                      "additionalProperties": false,
+                      "properties": {
+                        "name":    { "type": "string" },
+                        "type":    { "enum": ["date", "string", "number", "select", "path", "boolean"] },
+                        "label":   { "type": "string" },
+                        "default": {},
+                        "options": { "type": "array", "items": { "type": "string" } },
+                        "help":    { "type": "string" }
+                      }
+                    }
+                  },
+                  "template": { "type": "string", "description": "Script body. {{ParamName}} placeholders bind to params." },
+                  "notes":    { "type": "array", "items": { "$ref": "#/$defs/claim" } }
+                }
+              }
+            }
+          }
+        },
+
+        "hunting": {
+          "description": "Tab 3 — KQL. Every query declares its platform and table so the validator can lint it against the right schema.",
+          "type": "object",
+          "required": ["queries"],
+          "additionalProperties": false,
+          "properties": {
+            "queries": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["id", "title", "platform", "table", "query"],
+                "additionalProperties": false,
+                "properties": {
+                  "id":       { "type": "string" },
+                  "title":    { "type": "string" },
+                  "platform": { "enum": ["sentinel", "defender-xdr"] },
+                  "table":    { "type": "string" },
+                  "purpose":  { "enum": ["scope", "detect", "pivot", "baseline"] },
+                  "query":    { "type": "string" },
+                  "notes":    { "type": "array", "items": { "$ref": "#/$defs/claim" } }
+                }
+              }
+            }
+          }
+        },
+
+        "schema": {
+          "description": "Tab 4 — AuditData field dictionary for this scenario.",
+          "type": "object",
+          "required": ["fields"],
+          "additionalProperties": false,
+          "properties": {
+            "fields": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["name", "description"],
+                "additionalProperties": false,
+                "properties": {
+                  "name":            { "type": "string" },
+                  "type":            { "type": "string" },
+                  "description":     { "type": "string" },
+                  "officeActivityColumn": { "type": ["string", "null"], "description": "Corresponding Sentinel OfficeActivity column, or null if not projected. null is meaningful: it tells the analyst to acquire via PowerShell/Graph instead." },
+                  "gotcha":          { "type": "string" },
+                  "evidentialValue": { "enum": ["high", "medium", "low"] }
+                }
+              }
+            }
+          }
+        },
+
+        "caveats": {
+          "description": "Tab 5 — Latency, retention, licensing, coverage gaps.",
+          "type": "object",
+          "required": ["latency", "retention", "dataGaps"],
+          "additionalProperties": false,
+          "properties": {
+            "latency":   { "type": "array", "items": { "$ref": "#/$defs/claim" } },
+            "retention": { "type": "array", "items": { "$ref": "#/$defs/claim" } },
+            "dataGaps":  { "type": "array", "items": { "$ref": "#/$defs/claim" } },
+            "collectionPriority": { "type": "string", "description": "What to pull first when the clock is running." }
+          }
+        },
+
+        "crossValidation": {
+          "description": "Tab 6 — Corroborating artifacts outside the UAL.",
+          "type": "object",
+          "required": ["correlations"],
+          "additionalProperties": false,
+          "properties": {
+            "correlations": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["artifact", "pivot", "why"],
+                "additionalProperties": false,
+                "properties": {
+                  "artifact": { "type": "string" },
+                  "platform": { "enum": ["sentinel", "defender-xdr", "portal", "endpoint"] },
+                  "table":    { "type": ["string", "null"] },
+                  "pivot":    { "type": "string", "description": "The join key." },
+                  "why":      { "type": "string" },
+                  "query":    { "type": "string" },
+                  "notes":    { "type": "array", "items": { "$ref": "#/$defs/claim" } }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

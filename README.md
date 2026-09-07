@@ -1,3 +1,9 @@
+<h3 align="center">
+  <a href="t https://ironbranded.github.io/UAL-Academy/" target="_blank" rel="noopener noreferrer">
+    🟢 TRY THE ACADEMY🟢
+  </a>
+</h3>
+
 # Content data contract
 
 The renderer knows nothing about DFIR. All investigative content lives in

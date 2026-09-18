@@ -1,5 +1,5 @@
 <h3 align="center">
-  <a href="t https://ironbranded.github.io/UAL-Academy/" target="_blank" rel="noopener noreferrer">
+  <a href="https://ironbranded.github.io/UAL-Academy/" target="_blank" rel="noopener noreferrer">
     🟢 TRY THE ACADEMY🟢
   </a>
 </h3>

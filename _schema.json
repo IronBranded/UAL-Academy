@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://ironbranded.github.io/ual-framework/data/_schema.json",
+  "$id": "https://ironbranded.github.io/UAL-Academy/",
   "title": "UAL Framework category file",
   "description": "One file per sidebar category. Each category contains one or more scenarios; each scenario renders the six-tab workspace. Semantic correctness (RecordType membership, MITRE membership, KQL/platform schema agreement, placeholder-identifier policy) is enforced by scripts/validate.mjs, not by this schema.",
   "type": "object",

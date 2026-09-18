@@ -1,0 +1,924 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UAL Academy</title>
+<meta name="description" content="A field guide to Microsoft 365 audit logs for incident responders, threat hunters and cloud security engineers.">
+<script>
+  // Apply a saved theme before first paint so the page never flashes the wrong one.
+  try { var t = localStorage.getItem('ual-theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@400;500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap" rel="stylesheet">
+<style>
+/* ------------------------------------------------------------------
+   Design tokens. The page is a ledger: sage paper, blue-black ink,
+   a red margin mark for anything that changes a conclusion.
+------------------------------------------------------------------- */
+:root {
+  color-scheme: light;
+  --paper: #E6ECE0;
+  --sheet: #F2F5EC;
+  --ink: #1B2B36;
+  --ink-2: #465761;
+  --rule: #BAC6B5;
+  --rule-strong: #8DA088;
+  --red: #A62F27;
+  --amber: #8A5A08;
+  --blue: #1D4C78;
+  --code-bg: #EBF0E4;
+  --tok-c: #586A5F;
+  --tok-s: #7B3F10;
+  --tok-k: #1D4C78;
+  --tok-f: #0F5E63;
+  --tok-v: #6A2E7C;
+  --tok-p: #2B6A4B;
+  --tok-n: #A62F27;
+  --tok-ty: #7A5A00;
+  --sans: 'IBM Plex Sans Condensed', 'Arial Narrow', system-ui, sans-serif;
+  --serif: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+  --mono: 'IBM Plex Mono', ui-monospace, Consolas, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --paper: #131C19;
+    --sheet: #1A2521;
+    --ink: #DDE6DA;
+    --ink-2: #A5B4A9;
+    --rule: #2D3B35;
+    --rule-strong: #4A5C53;
+    --red: #E5796B;
+    --amber: #DBAA4C;
+    --blue: #86B4DE;
+    --code-bg: #0F1714;
+    --tok-c: #8FA196;
+    --tok-s: #E0A66D;
+    --tok-k: #86B4DE;
+    --tok-f: #6FCDD2;
+    --tok-v: #C9A2E0;
+    --tok-p: #7FCFA4;
+    --tok-n: #E5796B;
+    --tok-ty: #D9BE6A;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #131C19;
+  --sheet: #1A2521;
+  --ink: #DDE6DA;
+  --ink-2: #A5B4A9;
+  --rule: #2D3B35;
+  --rule-strong: #4A5C53;
+  --red: #E5796B;
+  --amber: #DBAA4C;
+  --blue: #86B4DE;
+  --code-bg: #0F1714;
+  --tok-c: #8FA196;
+  --tok-s: #E0A66D;
+  --tok-k: #86B4DE;
+  --tok-f: #6FCDD2;
+  --tok-v: #C9A2E0;
+  --tok-p: #7FCFA4;
+  --tok-n: #E5796B;
+  --tok-ty: #D9BE6A;
+}
+
+/* ------------------------------------------------------------------ base */
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 400 1.0625rem/1.6 var(--serif);
+}
+a { color: var(--blue); text-underline-offset: 0.18em; }
+a:hover { text-decoration-thickness: 2px; }
+:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
+p { margin: 0 0 0.9rem; }
+ul, ol { margin: 0 0 1rem; padding-left: 1.3rem; }
+li { margin-bottom: 0.35rem; }
+code, .mono { font-family: var(--mono); font-size: 0.88em; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.skip { position: absolute; left: -999px; top: 0; background: var(--ink); color: var(--paper); padding: 0.5rem 1rem; z-index: 50; }
+.skip:focus { left: 0; }
+
+/* ---------------------------------------------------------------- layout */
+.app { display: grid; grid-template-columns: 19.5rem minmax(0, 1fr); min-height: 100vh; }
+.side {
+  position: sticky; top: 0; height: 100vh; overflow-y: auto;
+  background: var(--sheet);
+  border-right: 1px solid var(--rule-strong);
+  padding: 1.5rem 1.25rem 2rem;
+  font-family: var(--sans);
+}
+.content { min-width: 0; }
+main { padding: 2.25rem clamp(1rem, 4vw, 3.5rem) 5rem; max-width: 66rem; outline: none; }
+.topbar { display: none; }
+.scrim { display: none; }
+
+.brand-link {
+  font: 700 1.9rem/1 var(--sans); letter-spacing: -0.01em;
+  color: var(--ink); text-decoration: none;
+}
+.brand-sub { margin: 0.4rem 0 0; font-size: 0.9rem; color: var(--ink-2); }
+.side hr.double { margin: 1rem 0; }
+.side-tools { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+.search { flex: 1; }
+.search input { width: 100%; }
+
+.toc-cat { margin-bottom: 1.4rem; }
+.toc-cat h2 { font: 600 1rem/1.3 var(--sans); margin: 0 0 0.4rem; display: flex; gap: 0.5rem; align-items: baseline; flex-wrap: wrap; }
+.toc-cat h2 a { color: var(--ink); text-decoration: none; }
+.toc-cat ul { list-style: none; padding: 0; margin: 0; border-left: 1px solid var(--rule-strong); }
+.toc-cat li { margin: 0; }
+.toc-cat li a {
+  display: block; padding: 0.4rem 0.75rem; font-size: 0.95rem; line-height: 1.3;
+  color: var(--ink-2); text-decoration: none; border-left: 4px solid transparent; margin-left: -1px;
+}
+.toc-cat li a:hover { color: var(--ink); background: var(--paper); }
+.toc-cat li a[aria-current="page"], .toc-cat h2 a[aria-current="page"] { color: var(--ink); font-weight: 600; }
+.toc-cat li a[aria-current="page"] { border-left-color: var(--red); background: var(--paper); }
+.empty { color: var(--ink-2); font-style: italic; }
+
+/* ------------------------------------------------------- headings, rules */
+h1 { font: 700 clamp(2rem, 4.2vw, 2.9rem)/1.08 var(--sans); letter-spacing: -0.012em; margin: 0 0 0.6rem; }
+h2 { font: 600 1.4rem/1.25 var(--sans); margin: 2.4rem 0 0.7rem; }
+h3 { font: 600 1.12rem/1.3 var(--sans); margin: 0 0 0.4rem; }
+.lede { font-size: 1.15rem; max-width: 64ch; color: var(--ink-2); }
+.prose { max-width: 68ch; }
+.crumb { font: 500 0.95rem var(--sans); margin: 0 0 0.6rem; }
+/* An accountant's total rule: thin, gap, thin. */
+hr.double { border: 0; height: 3px; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); margin: 1.1rem 0 1.4rem; }
+
+/* ------------------------------------------------------------------ tabs */
+.tabs { border-bottom: 1px solid var(--rule-strong); margin-bottom: 1.6rem; }
+.tabs ul { list-style: none; margin: 0; padding: 0; display: flex; overflow-x: auto; }
+.tabs li { margin: 0; flex: none; }
+.tabs a {
+  display: flex; gap: 0.45rem; align-items: baseline;
+  padding: 0.7rem 1rem 0.6rem; font: 500 1rem var(--sans);
+  color: var(--ink-2); text-decoration: none; border-bottom: 3px solid transparent;
+}
+.tabs a:hover { color: var(--ink); }
+.tabs a[aria-current="page"] { color: var(--ink); font-weight: 600; border-bottom-color: var(--ink); }
+.tabs .count { font-size: 0.8rem; color: var(--ink-2); }
+
+/* -------------------------------------------------------- claims (ledger) */
+.claims { list-style: none; padding: 0; margin: 0 0 1.2rem; border-top: 1px solid var(--rule); }
+.claim {
+  display: grid; grid-template-columns: 6px minmax(0, 1fr) 7.5rem; gap: 0 1rem;
+  padding: 0.85rem 0; margin: 0; border-bottom: 1px solid var(--rule);
+}
+.claim .mark { width: 1px; background: var(--rule-strong); justify-self: start; }
+.claim.sev-critical .mark { width: 6px; background: var(--red); }
+.claim.sev-caution .mark { width: 3px; background: var(--amber); }
+.claim-body p { margin: 0; max-width: 68ch; }
+.claim-body .claim-meta { display: flex; flex-wrap: wrap; gap: 0.25rem 0.8rem; margin-top: 0.35rem; font: 500 0.85rem var(--sans); color: var(--ink-2); }
+.sev-label { font-weight: 700; }
+.sev-critical .sev-label { color: var(--red); }
+.sev-caution .sev-label { color: var(--amber); }
+.claim-date { font: 400 0.82rem/1.35 var(--sans); color: var(--ink-2); text-align: right; }
+.claim-date .lbl { display: block; }
+.claim-date time { display: block; color: var(--ink); }
+.claim-date .stale { display: block; color: var(--amber); font-weight: 600; }
+
+/* ---------------------------------------------------------------- tags */
+.tag {
+  display: inline-block; font: 500 0.8rem/1.4 var(--sans); padding: 0 0.5rem;
+  border: 1px solid currentColor; border-radius: 2px; color: var(--ink-2); white-space: nowrap;
+}
+.tag.strong { color: var(--ink); }
+.tag.blue { color: var(--blue); }
+.tag.red { color: var(--red); }
+.tag.amber { color: var(--amber); }
+.tag.mute { color: var(--ink-2); font-weight: 400; }
+.badge.unverified { color: var(--amber); border: 1px solid currentColor; padding: 0 0.4rem; border-radius: 2px; font-weight: 600; }
+
+/* ------------------------------------------------------------ ledger rows */
+.rows { list-style: none; padding: 0; margin: 0 0 1.2rem; border-top: 1px solid var(--rule); }
+.row {
+  display: grid; grid-template-columns: minmax(0, 14rem) minmax(0, 1fr); gap: 0.2rem 1.5rem;
+  padding: 0.8rem 0; margin: 0; border-bottom: 1px solid var(--rule);
+}
+.row > :first-child { font: 600 1rem/1.35 var(--sans); overflow-wrap: anywhere; }
+.row .mono { font-weight: 500; }
+.row p { margin: 0 0 0.35rem; max-width: 68ch; }
+.row p:last-child { margin-bottom: 0; }
+.row .meta { display: flex; flex-wrap: wrap; gap: 0.3rem 0.8rem; font: 400 0.88rem var(--sans); color: var(--ink-2); }
+.row .gotcha { border-left: 3px solid var(--amber); padding-left: 0.75rem; margin-top: 0.5rem; }
+.row .gotcha b { font-family: var(--sans); color: var(--amber); }
+.row .absent { border-left: 3px solid var(--rule-strong); padding-left: 0.75rem; }
+
+.checklist { list-style: none; padding: 0; max-width: 68ch; }
+.checklist label { display: flex; gap: 0.7rem; align-items: baseline; cursor: pointer; }
+.checklist input { flex: none; margin-top: 0.3rem; accent-color: var(--blue); }
+
+/* -------------------------------------------------------------- code */
+.code { margin: 0 0 1.2rem; border: 1px solid var(--rule-strong); background: var(--code-bg); }
+.code figcaption {
+  display: flex; justify-content: space-between; gap: 0.75rem; align-items: center; flex-wrap: wrap;
+  padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--rule-strong); font: 500 0.88rem var(--sans);
+}
+.code-actions { display: flex; gap: 0.4rem; }
+.code pre {
+  margin: 0; padding: 0.9rem 1rem; overflow: auto; max-height: 34rem;
+  font: 400 0.84rem/1.55 var(--mono); tab-size: 4; color: var(--ink);
+}
+.code pre code { font: inherit; }
+.t-c { color: var(--tok-c); font-style: italic; }
+.t-s { color: var(--tok-s); }
+.t-k { color: var(--tok-k); font-weight: 500; }
+.t-f { color: var(--tok-f); }
+.t-v { color: var(--tok-v); }
+.t-p { color: var(--tok-p); }
+.t-n { color: var(--tok-n); }
+.t-ty { color: var(--tok-ty); }
+
+.btn {
+  font: 500 0.85rem var(--sans); padding: 0.3rem 0.75rem; color: var(--ink); background: transparent;
+  border: 1px solid var(--ink); border-radius: 2px; cursor: pointer;
+}
+.btn:hover { background: var(--ink); color: var(--paper); }
+
+input[type="text"], input[type="number"], input[type="search"], select {
+  font: 400 0.92rem var(--mono); color: var(--ink); background: var(--sheet);
+  border: 1px solid var(--ink-2); border-radius: 2px; padding: 0.45rem 0.6rem; min-width: 0;
+}
+input[aria-invalid="true"] { border-color: var(--red); border-width: 2px; }
+.side input[type="search"] { font-family: var(--sans); font-size: 0.95rem; }
+
+/* --------------------------------------------------------- method + form */
+.methods { list-style: none; padding: 0; margin: 0 0 1.4rem; border-top: 1px solid var(--rule); }
+.methods li { margin: 0; }
+.methods a {
+  display: block; padding: 0.7rem 0.9rem; border-bottom: 1px solid var(--rule);
+  border-left: 4px solid transparent; text-decoration: none; color: var(--ink);
+}
+.methods a:hover { background: var(--sheet); }
+.methods a[aria-current="page"] { border-left-color: var(--ink); background: var(--sheet); }
+.methods .m-title { font: 600 1rem/1.3 var(--sans); display: block; }
+.methods .m-sub { font: 400 0.88rem var(--sans); color: var(--ink-2); }
+
+.params { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 1rem 1.5rem; margin: 0 0 1.2rem; }
+.field label { display: block; font: 500 0.95rem var(--sans); margin-bottom: 0.25rem; }
+.field input, .field select { width: 100%; }
+.field .help, .field .err { font: 400 0.85rem/1.4 var(--sans); margin: 0.25rem 0 0; color: var(--ink-2); }
+.field .err { color: var(--red); font-weight: 500; }
+.field-check label { display: flex; gap: 0.6rem; align-items: center; margin: 0; }
+.tool-row { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; font: 400 0.9rem var(--sans); color: var(--ink-2); }
+
+.chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 1.2rem; }
+.chip { font: 500 0.9rem var(--sans); padding: 0.25rem 0.8rem; border: 1px solid var(--ink-2); background: transparent; color: var(--ink); border-radius: 2px; cursor: pointer; }
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+
+.item { margin: 0 0 2.2rem; }
+.item-meta { display: flex; flex-wrap: wrap; gap: 0.4rem 0.6rem; align-items: center; margin-bottom: 0.7rem; font: 400 0.9rem var(--sans); color: var(--ink-2); }
+.item .why { max-width: 68ch; }
+.priority { border: 1px solid var(--ink); border-left: 6px solid var(--blue); padding: 0.9rem 1.1rem; background: var(--sheet); max-width: 68ch; margin-bottom: 1.2rem; }
+.priority p { margin: 0; }
+.banner { border: 1px solid var(--amber); border-left: 6px solid var(--amber); padding: 0.7rem 1rem; max-width: 68ch; margin-bottom: 1.4rem; font-family: var(--sans); }
+.pane-empty { border: 1px dashed var(--rule-strong); padding: 1.6rem; max-width: 68ch; font-family: var(--sans); }
+.pane-empty h2 { margin-top: 0; }
+.cat-list { list-style: none; padding: 0; margin: 0 0 1.5rem; border-top: 1px solid var(--rule); }
+.cat-list li { margin: 0; }
+.cat-list a { display: block; padding: 0.8rem 0; border-bottom: 1px solid var(--rule); text-decoration: none; color: var(--ink); }
+.cat-list a:hover .cl-title { text-decoration: underline; }
+.cat-list .cl-title { font: 600 1.05rem var(--sans); display: block; }
+.cat-list .cl-sum { color: var(--ink-2); max-width: 68ch; display: block; }
+.find-input { width: 100%; max-width: 26rem; margin-bottom: 1rem; }
+
+/* --------------------------------------------------------------- small screens */
+@media (max-width: 860px) {
+  .app { display: block; }
+  .topbar {
+    display: flex; align-items: center; gap: 0.8rem; position: sticky; top: 0; z-index: 10;
+    background: var(--sheet); border-bottom: 1px solid var(--rule-strong); padding: 0.6rem 1rem;
+    font: 700 1.2rem var(--sans);
+  }
+  .side {
+    position: fixed; inset: 0 auto 0 0; width: min(21rem, 88vw); height: 100%; z-index: 30;
+    transform: translateX(-102%); visibility: hidden;
+  }
+  body.nav-open .side { transform: none; visibility: visible; }
+  body.nav-open .scrim { display: block; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); z-index: 20; }
+  main { padding-top: 1.5rem; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  @media (max-width: 860px) { .side { transition: transform 0.18s ease-out, visibility 0.18s; } }
+}
+@media (max-width: 640px) {
+  .claim { grid-template-columns: 6px minmax(0, 1fr); }
+  .claim-date { grid-column: 2; text-align: left; margin-top: 0.4rem; display: flex; gap: 0.5rem; flex-wrap: wrap; }
+  .claim-date .lbl, .claim-date time, .claim-date .stale { display: inline; }
+  .row { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#view">Skip to content</a>
+<div class="app">
+  <aside class="side" id="side" aria-label="Contents">
+    <a class="brand-link" href="#/">UAL Academy</a>
+    <p class="brand-sub">Microsoft 365 audit logs, for people who have to explain what happened.</p>
+    <hr class="double">
+    <div class="side-tools">
+      <label class="search"><span class="sr">Search scenarios, operations and fields</span>
+        <input id="q" type="search" placeholder="Search operations, fields" autocomplete="off"></label>
+      <button class="btn" id="theme" type="button">Theme</button>
+    </div>
+    <nav id="toc" aria-label="Scenarios"></nav>
+  </aside>
+  <div class="scrim" id="scrim"></div>
+  <div class="content">
+    <header class="topbar"><button class="btn" id="menu" type="button" aria-controls="side" aria-expanded="false">Menu</button><span>UAL Academy</span></header>
+    <main id="view" tabindex="-1"><p>Loading the log guides…</p></main>
+  </div>
+</div>
+<div class="sr" id="live" aria-live="polite"></div>
+
+<script>
+(() => {
+'use strict';
+
+/* ==================================================================
+   Constants
+================================================================== */
+const TABS = [
+  { id: 'overview',    label: 'Overview & triage' },
+  { id: 'acquire',     label: 'Acquire' },
+  { id: 'hunt',        label: 'Hunt (KQL)' },
+  { id: 'fields',      label: 'Fields' },
+  { id: 'limits',      label: 'Gaps & limits' },
+  { id: 'corroborate', label: 'Cross-check' }
+];
+const PLATFORM  = { 'sentinel': 'Microsoft Sentinel', 'defender-xdr': 'Defender XDR', 'portal': 'Portal', 'endpoint': 'Endpoint' };
+const TRANSPORT = { 'exo-powershell': 'Exchange Online PowerShell', 'graph-auditlogquery': 'Graph AuditLogQuery API', 'management-activity-api': 'Management Activity API' };
+const PURPOSE   = { baseline: 'Run first', scope: 'Scope', detect: 'Detect', pivot: 'Pivot' };
+const TIER      = { standard: 'Audit (Standard)', premium: 'Audit (Premium)', mixed: 'Standard and Premium' };
+const STATUS    = { draft: 'Draft', stub: 'Planned' };
+const STALE_MS  = 180 * 864e5;
+
+const state = { tax: { recordTypes: [], mitre: [] }, cats: [], errors: [], q: '', values: {}, huntFilter: 'all', lastKey: null };
+
+/* ==================================================================
+   Small helpers
+================================================================== */
+const $ = (s, r = document) => r.querySelector(s);
+
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  if (attrs) for (const [k, v] of Object.entries(attrs)) {
+    if (v == null || v === false) continue;
+    if (k === 'class') el.className = v;
+    else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2), v);
+    else if (v === true) el.setAttribute(k, '');
+    else el.setAttribute(k, v);
+  }
+  for (const kid of kids.flat(Infinity)) {
+    if (kid == null || kid === false) continue;
+    el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  }
+  return el;
+}
+const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const link = (...parts) => '#/' + parts.filter(Boolean).map(encodeURIComponent).join('/');
+const say = msg => { const l = $('#live'); l.textContent = ''; setTimeout(() => { l.textContent = msg; }, 30); };
+
+async function getJSON(url) {
+  const r = await fetch(url, { cache: 'no-cache' });
+  if (!r.ok) throw new Error(`${url} returned ${r.status}`);
+  return r.json();
+}
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); }
+  catch {
+    const ta = h('textarea', { style: 'position:fixed;opacity:0' });
+    ta.value = t; document.body.append(ta); ta.select();
+    try { document.execCommand('copy'); } catch {}
+    ta.remove();
+  }
+}
+function download(name, text) {
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+  const a = h('a', { href: url, download: name });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+const rtName = (cat, id) =>
+  (cat.recordTypes || []).find(r => r.id === id)?.member || state.tax.recordTypes.find(r => r.id === id)?.member || '';
+
+function shortUrl(u) {
+  try {
+    const x = new URL(u);
+    if (x.protocol !== 'https:' && x.protocol !== 'http:') return null;
+    const seg = x.pathname.split('/').filter(Boolean).pop();
+    return x.hostname + (seg ? '/…/' + seg : '');
+  } catch { return null; }
+}
+
+/* ==================================================================
+   Syntax highlighting (PowerShell and KQL). Everything is escaped.
+================================================================== */
+function highlight(src, re, cls) {
+  let out = '', last = 0, m;
+  re.lastIndex = 0;
+  while ((m = re.exec(src))) {
+    out += esc(src.slice(last, m.index));
+    const c = cls(m);
+    out += c ? `<span class="t-${c}">${esc(m[0])}</span>` : esc(m[0]);
+    last = m.index + m[0].length;
+    if (m[0].length === 0) re.lastIndex++;
+  }
+  return out + esc(src.slice(last));
+}
+const PS_KW = new Set('if else elseif foreach for while do until switch function param return break continue try catch finally throw in begin process end filter trap exit'.split(' '));
+const PS_RE = /(<#[\s\S]*?#>)|(#.*)|('(?:''|[^'])*')|("(?:`[\s\S]|[^"`])*")|(\$\{[^}]+\}|\$[A-Za-z_][\w:]*)|(\s-[A-Za-z][\w-]*)|(\[[A-Za-z][\w.,\[\]\s]*\])|(\b\d+(?:\.\d+)?\b)|(\b[A-Za-z][\w-]*\b)/g;
+const hlPS = src => highlight(src, PS_RE, m => {
+  if (m[1] || m[2]) return 'c';
+  if (m[3] || m[4]) return 's';
+  if (m[5]) return 'v';
+  if (m[6]) return 'p';
+  if (m[7]) return 'ty';
+  if (m[8]) return 'n';
+  if (m[9]) {
+    if (/^[A-Z][a-z]+-[A-Z]/.test(m[9])) return 'f';
+    if (PS_KW.has(m[9].toLowerCase())) return 'k';
+  }
+  return null;
+});
+const KQL_KW = new Set('where extend summarize project order by let take top join on union distinct sort asc desc and or not in has has_any has_all contains startswith endswith between kind isnotempty isempty mv-expand of'.split(' '));
+const KQL_FN = new Set('ago count countif min max sum avg make_set make_list dcount tostring toint tobool todatetime extract iff case strcat pack_array set_difference dynamic array_length parse_json bin now'.split(' '));
+const KQL_RE = /(\/\/.*)|(@'[^']*'|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*")|(\b\d+(?:\.\d+)?(?:ms|s|m|h|d)?\b)|(\b[A-Za-z_]\w*\b)|(\|)/g;
+const hlKql = src => highlight(src, KQL_RE, m => {
+  if (m[1]) return 'c';
+  if (m[2]) return 's';
+  if (m[3]) return 'n';
+  if (m[4]) {
+    const w = m[4].toLowerCase();
+    if (KQL_KW.has(w)) return 'k';
+    if (KQL_FN.has(w)) return 'f';
+    return null;
+  }
+  if (m[5]) return 'k';
+  return null;
+});
+
+/* ==================================================================
+   Reusable pieces
+================================================================== */
+function claimRow(c) {
+  const sev = c.severity || 'info';
+  const stale = c.lastVerified && (Date.now() - Date.parse(c.lastVerified) > STALE_MS);
+  const src = c.source && shortUrl(c.source);
+  return h('li', { class: `claim sev-${sev}` },
+    h('span', { class: 'mark', 'aria-hidden': 'true' }),
+    h('div', { class: 'claim-body' },
+      h('p', null, c.text),
+      (sev !== 'info' || c.verified === false || src) && h('p', { class: 'claim-meta' },
+        sev !== 'info' && h('span', { class: 'sev-label' }, sev === 'critical' ? 'Critical' : 'Caution'),
+        c.verified === false && h('span', { class: 'badge unverified' }, 'Unverified'),
+        src && h('a', { href: c.source, target: '_blank', rel: 'noopener', title: c.source }, src))),
+    h('div', { class: 'claim-date' },
+      c.lastVerified && [
+        h('span', { class: 'lbl' }, 'Checked'),
+        h('time', { datetime: c.lastVerified }, c.lastVerified),
+        stale && h('span', { class: 'stale' }, 'Re-check')
+      ]));
+}
+function claims(list, label) {
+  const items = (list || []).filter(Boolean);
+  if (!items.length) return null;
+  return h('ul', { class: 'claims', 'aria-label': label }, items.map(claimRow));
+}
+const sec = (title, ...kids) => {
+  const body = kids.flat(Infinity).filter(Boolean);
+  return body.length ? h('section', null, h('h2', null, title), body) : null;
+};
+const emptyNote = t => h('p', { class: 'empty' }, t);
+
+function codeBlock({ lang, label, filename, text }) {
+  const code = h('code');
+  const pre = h('pre', { tabindex: '0', role: 'region', 'aria-label': label });
+  pre.append(code);
+  let current = text;
+  const set = t => { current = t; code.innerHTML = lang === 'powershell' ? hlPS(t) : hlKql(t); };
+  set(text);
+  const copyBtn = h('button', { type: 'button', class: 'btn', onclick: async () => {
+    await copyText(current); copyBtn.textContent = 'Copied'; say('Copied to clipboard');
+    setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1600);
+  } }, 'Copy');
+  const dlBtn = filename && h('button', { type: 'button', class: 'btn', onclick: () => download(filename, current) }, 'Download');
+  const el = h('figure', { class: 'code' },
+    h('figcaption', null, h('span', null, label), h('span', { class: 'code-actions' }, copyBtn, dlBtn)),
+    pre);
+  return { el, set };
+}
+
+/* ==================================================================
+   Tab views
+================================================================== */
+function overviewView(cat, scn) {
+  const o = scn.overview || {};
+  const ual = o.ual || {};
+  const acc = o.access || {};
+  return h('div', null,
+    o.context && h('p', { class: 'prose' }, o.context),
+
+    sec('What the attacker does', o.actorBehavior?.length && h('ul', { class: 'prose' }, o.actorBehavior.map(t => h('li', null, t)))),
+
+    sec('Questions to answer', o.triageQuestions?.length && h('ul', { class: 'checklist' },
+      o.triageQuestions.map((t, i) => h('li', null, h('label', null, h('input', { type: 'checkbox', id: `tq-${i}` }), h('span', null, t)))))),
+
+    sec('MITRE ATT&CK', o.mitre?.length && h('ul', { class: 'rows' }, o.mitre.map(m => {
+      const known = state.tax.mitre.find(x => x.id === m.id);
+      const path = m.id.replace('.', '/');
+      return h('li', { class: 'row' },
+        h('span', null, h('a', { href: `https://attack.mitre.org/techniques/${path}/`, target: '_blank', rel: 'noopener' }, m.id), ' ',
+          h('span', { class: `tag ${m.role === 'primary' ? 'strong' : 'mute'}` }, m.role === 'primary' ? 'Primary' : 'Supporting'),
+          m.verified === false && [' ', h('span', { class: 'badge unverified' }, 'Unverified')]),
+        h('div', null, known && h('p', null, h('b', null, known.name)), m.note && h('p', null, m.note)));
+    }))),
+
+    sec('Where it is logged',
+      ual.workloads?.length && h('p', null, 'Workload: ', ual.workloads.join(', ')),
+      ual.recordTypeIds?.length && h('ul', { class: 'rows' }, ual.recordTypeIds.map(id => {
+        const rt = (cat.recordTypes || []).find(r => r.id === id);
+        return h('li', { class: 'row' },
+          h('span', { class: 'mono' }, rtName(cat, id) || `RecordType ${id}`),
+          h('div', null, h('p', { class: 'meta' }, h('span', null, `RecordType ${id}`)), rt?.role && h('p', null, rt.role)));
+      })),
+      ual.operations?.length && [
+        h('h3', { style: 'margin-top:1.4rem' }, 'Operations to search for'),
+        h('ul', { class: 'rows' }, ual.operations.map(op => h('li', { class: 'row' },
+          h('span', { class: 'mono' }, op.name),
+          h('div', null,
+            h('p', { class: 'meta' }, h('span', null, `${rtName(cat, op.recordTypeId) || 'RecordType'} (${op.recordTypeId})`),
+              op.verified === false && h('span', { class: 'badge unverified' }, 'Unverified')),
+            op.note && h('p', null, op.note)))))
+      ]),
+
+    sec('Licensing and access',
+      acc.auditTier && h('p', null, 'Audit tier: ', h('span', { class: 'tag strong' }, TIER[acc.auditTier] || acc.auditTier)),
+      claims(acc.licenseNotes, 'Licensing notes'),
+      acc.rbac?.length && [h('h3', null, 'Roles and permissions'), claims(acc.rbac, 'Roles and permissions')])
+  );
+}
+
+/* ---- Acquire ---- */
+const ISO_RE = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:\d{2})?)?$/;
+function fillTemplate(tpl, params, vals) {
+  return tpl.replace(/\{\{(\w+)\}\}/g, (m, name) => {
+    const p = params.find(x => x.name === name);
+    const v = vals[name];
+    if (p?.type === 'number') { const n = Number(v); return Number.isFinite(n) && v !== '' ? String(n) : String(p.default ?? 0); }
+    if (p?.type === 'boolean') return v ? '$true' : '$false';
+    return String(v ?? '').replace(/[\r\n]+/g, ' ').replace(/'/g, "''");
+  });
+}
+function acquireView(cat, scn, r) {
+  const methods = scn.acquisition?.methods || [];
+  if (!methods.length) return emptyNote('No acquisition method has been written for this scenario yet.');
+  const m = methods.find(x => x.id === r.method) || methods[0];
+  const params = m.params || [];
+  const key = `${scn.id}/${m.id}`;
+  const defaults = () => Object.fromEntries(params.map(p => [p.name, p.default ?? (p.type === 'boolean' ? false : '')]));
+  const vals = state.values[key] ||= defaults();
+
+  const out = h('div', null);
+  if (methods.length > 1) {
+    out.append(h('ul', { class: 'methods', 'aria-label': 'Acquisition methods' }, methods.map(x => h('li', null,
+      h('a', { href: link(cat.id, scn.id, 'acquire', x.id), 'aria-current': x.id === m.id ? 'page' : null },
+        h('span', { class: 'm-title' }, x.title), h('span', { class: 'm-sub' }, TRANSPORT[x.transport] || x.transport))))));
+  } else {
+    out.append(h('p', { class: 'meta' }, h('span', { class: 'tag strong' }, TRANSPORT[m.transport] || m.transport), ' ', h('b', null, m.title)));
+  }
+  out.append(claims([m.status], 'Current status of this method'));
+
+  const script = codeBlock({
+    lang: 'powershell', label: `${scn.id}-${m.id}.ps1`, filename: `${scn.id}-${m.id}.ps1`,
+    text: fillTemplate(m.template, params, vals)
+  });
+  const refresh = () => script.set(fillTemplate(m.template, params, vals));
+
+  if (params.length) {
+    const grid = h('div', { class: 'params' });
+    const inputs = [];
+    const validate = () => {
+      for (const { p, input, err } of inputs) {
+        let msg = '';
+        if (p.type === 'date' && vals[p.name] && !ISO_RE.test(vals[p.name])) msg = 'Use UTC ISO 8601, for example 2026-08-01T00:00:00Z.';
+        if (p.type === 'number' && (vals[p.name] === '' || !Number.isFinite(Number(vals[p.name])))) msg = 'Enter a number.';
+        input.setAttribute('aria-invalid', msg ? 'true' : 'false');
+        err.textContent = msg;
+      }
+      const s = params.find(p => p.name === 'StartDate'), e = params.find(p => p.name === 'EndDate');
+      if (s && e && ISO_RE.test(vals.StartDate) && ISO_RE.test(vals.EndDate) && Date.parse(vals.StartDate) >= Date.parse(vals.EndDate)) {
+        const ei = inputs.find(x => x.p.name === 'EndDate');
+        ei.input.setAttribute('aria-invalid', 'true'); ei.err.textContent = 'End must be after start.';
+      }
+    };
+    params.forEach((p, i) => {
+      const id = `p-${i}`, hid = `${id}-h`, eid = `${id}-e`;
+      let input;
+      if (p.type === 'select') {
+        input = h('select', { id }, (p.options || []).map(o => h('option', { value: o }, o)));
+        input.value = vals[p.name];
+      } else if (p.type === 'boolean') {
+        input = h('input', { id, type: 'checkbox' }); input.checked = !!vals[p.name];
+      } else {
+        input = h('input', { id, type: p.type === 'number' ? 'number' : 'text', spellcheck: 'false', autocomplete: 'off' });
+        input.value = vals[p.name];
+      }
+      input.setAttribute('aria-describedby', `${hid} ${eid}`);
+      const err = h('p', { class: 'err', id: eid, role: 'alert' });
+      input.addEventListener(p.type === 'select' || p.type === 'boolean' ? 'change' : 'input', () => {
+        vals[p.name] = p.type === 'boolean' ? input.checked : input.value;
+        validate(); refresh();
+      });
+      inputs.push({ p, input, err });
+      grid.append(p.type === 'boolean'
+        ? h('div', { class: 'field field-check' }, h('label', { for: id }, input, p.label || p.name), h('p', { class: 'help', id: hid }, p.help), err)
+        : h('div', { class: 'field' }, h('label', { for: id }, p.label || p.name), input, h('p', { class: 'help', id: hid }, p.help), err));
+    });
+    out.append(h('h2', null, 'Set the values'), grid,
+      h('div', { class: 'tool-row' },
+        h('button', { type: 'button', class: 'btn', onclick: () => {
+          Object.assign(vals, defaults());
+          inputs.forEach(({ p, input }) => { if (p.type === 'boolean') input.checked = !!vals[p.name]; else input.value = vals[p.name]; });
+          validate(); refresh();
+        } }, 'Reset to defaults'),
+        h('span', null, 'The script updates as you type. Nothing leaves your browser.')));
+    validate();
+  }
+  out.append(h('h2', null, 'Script'), script.el, m.notes?.length && [h('h3', null, 'Notes'), claims(m.notes, 'Notes on this method')]);
+  return out;
+}
+
+/* ---- Hunt ---- */
+function huntView(cat, scn) {
+  const all = scn.hunting?.queries || [];
+  if (!all.length) return emptyNote('No hunting queries have been written for this scenario yet.');
+  const platforms = [...new Set(all.map(q => q.platform))];
+  const shown = state.huntFilter === 'all' ? all : all.filter(q => q.platform === state.huntFilter);
+  const out = h('div', null);
+  if (platforms.length > 1) {
+    out.append(h('div', { class: 'chips', role: 'group', 'aria-label': 'Filter by platform' },
+      ['all', ...platforms].map(p => h('button', {
+        type: 'button', class: 'chip', 'aria-pressed': String(state.huntFilter === p),
+        onclick: () => { state.huntFilter = p; render(); }
+      }, p === 'all' ? 'All platforms' : PLATFORM[p] || p))));
+  }
+  for (const q of shown) {
+    const code = codeBlock({ lang: 'kql', label: `${q.id}.kql`, filename: `${q.id}.kql`, text: q.query });
+    out.append(h('section', { class: 'item' },
+      h('h3', null, q.title),
+      h('div', { class: 'item-meta' },
+        h('span', null, PLATFORM[q.platform] || q.platform), h('span', { class: 'tag strong mono' }, q.table),
+        q.purpose && h('span', { class: `tag ${q.purpose === 'baseline' ? 'blue' : 'mute'}` }, PURPOSE[q.purpose] || q.purpose)),
+      code.el,
+      q.notes?.length && claims(q.notes, `Notes on ${q.title}`)));
+  }
+  return out;
+}
+
+/* ---- Fields ---- */
+function fieldsView(cat, scn) {
+  const fields = scn.schema?.fields || [];
+  if (!fields.length) return emptyNote('No field dictionary has been written for this scenario yet.');
+  const list = h('ul', { class: 'rows' });
+  const rows = fields.map(f => {
+    const row = h('li', { class: 'row' },
+      h('span', { class: 'mono' }, f.name),
+      h('div', null,
+        h('p', null, f.description),
+        h('p', { class: 'meta' },
+          f.type && h('span', null, `Type: ${f.type}`),
+          f.evidentialValue && h('span', null, `Evidence value: ${f.evidentialValue}`),
+          typeof f.officeActivityColumn === 'string' && h('span', null, 'Sentinel column: ', h('span', { class: 'mono' }, f.officeActivityColumn))),
+        f.officeActivityColumn === null && h('p', { class: 'absent' }, 'Not projected into Sentinel OfficeActivity. Get it from PowerShell or Graph.'),
+        f.gotcha && h('p', { class: 'gotcha' }, h('b', null, 'Watch out: '), f.gotcha)));
+    row._hay = `${f.name} ${f.description} ${f.officeActivityColumn || ''}`.toLowerCase();
+    list.append(row);
+    return row;
+  });
+  const none = h('p', { class: 'empty', hidden: true }, 'No field matches that filter.');
+  const find = h('input', { type: 'search', class: 'find-input', placeholder: 'Filter fields', 'aria-label': 'Filter fields' });
+  find.addEventListener('input', () => {
+    const q = find.value.trim().toLowerCase(); let n = 0;
+    rows.forEach(r => { const hit = !q || r._hay.includes(q); r.hidden = !hit; if (hit) n++; });
+    none.hidden = n > 0;
+  });
+  return h('div', null, find, list, none);
+}
+
+/* ---- Limits ---- */
+function limitsView(cat, scn) {
+  const c = scn.caveats || {};
+  return h('div', null,
+    c.collectionPriority && h('div', { class: 'priority' }, h('h3', null, 'What to pull first'), h('p', null, c.collectionPriority)),
+    sec('Latency', claims(c.latency, 'Latency')),
+    sec('Retention', claims(c.retention, 'Retention')),
+    sec('Known gaps', claims(c.dataGaps, 'Known gaps')));
+}
+
+/* ---- Cross-check ---- */
+function corroborateView(cat, scn) {
+  const list = scn.crossValidation?.correlations || [];
+  if (!list.length) return emptyNote('No corroborating artifacts have been recorded for this scenario yet.');
+  return h('div', null, list.map((x, i) => h('section', { class: 'item' },
+    h('h3', null, x.artifact),
+    h('div', { class: 'item-meta' },
+      x.platform && h('span', null, PLATFORM[x.platform] || x.platform),
+      x.table && h('span', { class: 'tag strong mono' }, x.table)),
+    h('p', { class: 'why' }, h('b', null, 'Join on: '), x.pivot),
+    h('p', { class: 'why' }, x.why),
+    x.query && codeBlock({ lang: 'kql', label: `${x.table || 'query'}-${i + 1}.kql`, filename: `xval-${i + 1}.kql`, text: x.query }).el,
+    x.notes?.length && claims(x.notes, `Notes on ${x.artifact}`))));
+}
+
+const VIEWS = { overview: overviewView, acquire: acquireView, hunt: huntView, fields: fieldsView, limits: limitsView, corroborate: corroborateView };
+const tabCount = (scn, id) => ({
+  acquire: scn.acquisition?.methods?.length,
+  hunt: scn.hunting?.queries?.length,
+  fields: scn.schema?.fields?.length,
+  corroborate: scn.crossValidation?.correlations?.length
+}[id]);
+
+/* ==================================================================
+   Page views
+================================================================== */
+function stubPane(cat) {
+  return h('div', { class: 'pane-empty' }, h('h2', null, 'Not written yet'),
+    h('p', null, `${cat.title} is planned but has no reviewed content. It is shown here so you can see the coverage map, not as guidance to rely on.`));
+}
+function scenarioView(cat, scn, r) {
+  const tab = TABS.find(t => t.id === r.tab)?.id || 'overview';
+  const wrap = h('article', null,
+    h('p', { class: 'crumb' }, h('a', { href: link(cat.id) }, cat.title)),
+    h('h1', null, scn.title),
+    scn.summary && h('p', { class: 'lede' }, scn.summary),
+    h('hr', { class: 'double' }));
+  if (cat.status === 'stub') { wrap.append(stubPane(cat)); return wrap; }
+  if (cat.status === 'draft') wrap.append(h('p', { class: 'banner' }, 'This category is a draft. Its content has not been fully reviewed.'));
+  wrap.append(
+    h('nav', { class: 'tabs', 'aria-label': 'Sections of this scenario' }, h('ul', null, TABS.map(t => {
+      const n = tabCount(scn, t.id);
+      return h('li', null, h('a', { href: link(cat.id, scn.id, t.id), 'aria-current': t.id === tab ? 'page' : null },
+        t.label, n ? h('span', { class: 'count' }, n) : null));
+    }))),
+    h('div', { id: 'panel' }, (() => {
+      const body = VIEWS[tab](cat, scn, r);
+      if (!body.childNodes.length) body.append(emptyNote('Nothing has been written for this section yet.'));
+      return body;
+    })()));
+  return wrap;
+}
+function scenarioList(cat) {
+  return h('ul', { class: 'cat-list' }, (cat.scenarios || []).map(s => h('li', null,
+    h('a', { href: link(cat.id, s.id) }, h('span', { class: 'cl-title' }, s.title), s.summary && h('span', { class: 'cl-sum' }, s.summary)))));
+}
+function categoryView(cat) {
+  return h('article', null,
+    h('h1', null, cat.title), cat.summary && h('p', { class: 'lede' }, cat.summary), h('hr', { class: 'double' }),
+    cat.status !== 'complete' && h('p', { class: 'banner' }, cat.status === 'stub' ? 'This category is planned but not written yet.' : 'This category is a draft. Its content has not been fully reviewed.'),
+    sec('Scenarios', cat.status === 'stub' ? null : scenarioList(cat)),
+    sec('Record types in this category', cat.recordTypes?.length && h('ul', { class: 'rows' }, cat.recordTypes.map(rt => h('li', { class: 'row' },
+      h('span', { class: 'mono' }, rt.member), h('div', null, h('p', { class: 'meta' }, h('span', null, `RecordType ${rt.id}`)), rt.role && h('p', null, rt.role)))))));
+}
+function homeView() {
+  const samples = [
+    { text: 'A red bar in the margin means a mistake here changes your conclusion. Read these before you report anything.', severity: 'critical' },
+    { text: 'An amber bar marks a limit or condition to confirm in your own tenant.', severity: 'caution' },
+    { text: 'A claim tagged Unverified has not been confirmed against Microsoft documentation. Confirm it before you rely on it.', verified: false },
+    { text: 'A claim with no bar is background. Where Microsoft documents it, the source is linked underneath.', source: 'https://learn.microsoft.com/en-us/purview/audit-log-investigate-accounts' }
+  ];
+  return h('article', null,
+    h('h1', null, 'UAL Academy'),
+    h('p', { class: 'lede' }, 'A field guide to Microsoft 365 audit logs for incident responders, threat hunters and cloud security engineers. Each scenario starts with an investigation question, then shows which log answers it, how to pull it, how to hunt it, and what the log cannot tell you.'),
+    h('hr', { class: 'double' }),
+    sec('How to read the margins',
+      h('p', { class: 'prose' }, 'Audit log guidance goes out of date quickly, so every claim here carries the date someone last checked it. The right-hand column shows that date and flags claims older than 180 days for re-checking.'),
+      claims(samples, 'Examples of margin marks')),
+    sec('Investigation areas',
+      state.cats.map(c => h('div', { style: 'margin-bottom:1.6rem' },
+        h('h3', null, h('a', { href: link(c.id) }, c.title), ' ', c.status !== 'complete' && h('span', { class: 'tag mute' }, STATUS[c.status] || c.status)),
+        c.summary && h('p', { class: 'prose' }, c.summary),
+        c.status === 'stub' ? null : scenarioList(c)))),
+    state.errors.length ? h('div', { class: 'banner', role: 'alert' }, h('b', null, 'Some content failed to load.'), h('ul', null, state.errors.map(e => h('li', null, e)))) : null);
+}
+function notFound() {
+  return h('div', { class: 'pane-empty' }, h('h2', null, 'That page does not exist'),
+    h('p', null, 'The link points to a category or scenario that is not in the guide. ', h('a', { href: '#/' }, 'Go to the start page.')));
+}
+function showFatal(msg, hint) {
+  $('#view').replaceChildren(h('div', { class: 'pane-empty' }, h('h2', null, 'The content files did not load'),
+    h('p', null, msg), hint && h('p', null, hint)));
+}
+
+/* ==================================================================
+   Router and sidebar
+================================================================== */
+function parseRoute() {
+  const p = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
+  return { cat: p[0], scn: p[1], tab: p[2], method: p[3] };
+}
+function renderToc(r) {
+  const toc = $('#toc'); toc.replaceChildren();
+  const q = state.q.trim().toLowerCase();
+  let any = false;
+  for (const c of state.cats) {
+    const scns = (c.scenarios || []).filter(s => !q || s._hay.includes(q));
+    if (q && !scns.length) continue;
+    any = true;
+    toc.append(h('section', { class: 'toc-cat' },
+      h('h2', null, h('a', { href: link(c.id), 'aria-current': r.cat === c.id && !r.scn ? 'page' : null }, c.title),
+        c.status !== 'complete' && h('span', { class: 'tag mute' }, STATUS[c.status] || c.status)),
+      h('ul', null, scns.map(s => h('li', null,
+        h('a', { href: link(c.id, s.id), 'aria-current': r.cat === c.id && r.scn === s.id ? 'page' : null }, s.title))))));
+  }
+  if (!any) toc.append(h('p', { class: 'empty' }, 'Nothing matches that search.'));
+}
+function render() {
+  const r = parseRoute();
+  renderToc(r);
+  document.body.classList.remove('nav-open');
+  $('#menu').setAttribute('aria-expanded', 'false');
+  const cat = state.cats.find(c => c.id === r.cat);
+  let node, title = 'UAL Academy';
+  if (!r.cat) node = homeView();
+  else if (!cat) node = notFound();
+  else if (!r.scn) { node = categoryView(cat); title = `${cat.title} | UAL Academy`; }
+  else {
+    const scn = (cat.scenarios || []).find(s => s.id === r.scn);
+    if (!scn) node = notFound();
+    else { node = scenarioView(cat, scn, r); title = `${scn.title} | UAL Academy`; }
+  }
+  $('#view').replaceChildren(node);
+  document.title = title;
+  const key = `${r.cat}/${r.scn}`;
+  if (key !== state.lastKey) {
+    if (state.lastKey !== null) { window.scrollTo(0, 0); $('#view').focus({ preventScroll: true }); }
+    state.lastKey = key;
+  }
+}
+
+/* ==================================================================
+   Loading and wiring
+================================================================== */
+async function loadAll() {
+  const [tax, ids] = await Promise.all([
+    getJSON('data/taxonomy.json').catch(() => null),
+    getJSON('data/manifest.json').then(m => m.categories).catch(() => ['mailbox-operations'])
+  ]);
+  if (tax) state.tax = tax;
+  const results = await Promise.allSettled(ids.map(id => getJSON(`data/categories/${encodeURIComponent(id)}.json`)));
+  results.forEach((res, i) => res.status === 'fulfilled' ? state.cats.push(res.value) : state.errors.push(`${ids[i]}: ${res.reason.message}`));
+  if (!state.cats.length) throw new Error(state.errors.join('; ') || 'No categories were found.');
+  state.cats.sort((a, b) => (a.order ?? 99) - (b.order ?? 99));
+  for (const c of state.cats) for (const s of c.scenarios || []) {
+    s._hay = [c.title, s.title, s.summary,
+      ...(s.overview?.ual?.operations || []).map(o => o.name),
+      ...(s.schema?.fields || []).map(f => f.name),
+      ...(s.overview?.mitre || []).map(m => m.id)].filter(Boolean).join(' ').toLowerCase();
+  }
+}
+function wire() {
+  const root = document.documentElement;
+  const effective = () => root.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  const label = () => { $('#theme').textContent = effective() === 'dark' ? 'Light mode' : 'Dark mode'; };
+  label();
+  $('#theme').addEventListener('click', () => {
+    const next = effective() === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme', next);
+    try { localStorage.setItem('ual-theme', next); } catch {}
+    label();
+  });
+  $('#menu').addEventListener('click', () => {
+    const open = document.body.classList.toggle('nav-open');
+    $('#menu').setAttribute('aria-expanded', String(open));
+  });
+  $('#scrim').addEventListener('click', () => { document.body.classList.remove('nav-open'); $('#menu').setAttribute('aria-expanded', 'false'); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') document.body.classList.remove('nav-open'); });
+  $('#q').addEventListener('input', e => { state.q = e.target.value; renderToc(parseRoute()); });
+}
+async function init() {
+  wire();
+  if (location.protocol === 'file:') {
+    showFatal('Browsers block a page opened from disk from reading the JSON files next to it.',
+      'Serve the folder instead, for example run "python -m http.server" in the repository root and open http://localhost:8000.');
+    return;
+  }
+  try { await loadAll(); }
+  catch (e) { showFatal(e.message, 'Check that data/categories/ is published and that the file names match the entries in data/manifest.json.'); return; }
+  window.addEventListener('hashchange', render);
+  render();
+}
+init();
+})();
+</script>
+</body>
+</html>
